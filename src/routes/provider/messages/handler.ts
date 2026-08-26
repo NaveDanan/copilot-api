@@ -34,7 +34,12 @@ import {
   isDashScopeAliyunProvider,
 } from "~/lib/dashscope"
 import { HTTPError } from "~/lib/error"
-import { createHandlerLogger, debugJson, debugLazy } from "~/lib/logger"
+import {
+  createHandlerLogger,
+  debugJson,
+  debugLazy,
+  logStreamParseError,
+} from "~/lib/logger"
 import { resolveProviderConfig } from "~/lib/provider-resolver"
 import { resolveBridgeToolSearchName } from "~/lib/tool-search"
 import {
@@ -1015,10 +1020,12 @@ const parseOpenAICompatibleStreamChunk = (
   try {
     return JSON.parse(data) as ChatCompletionChunk
   } catch (error) {
-    logger.error("provider.messages.openai_compatible.parse_chunk_error", {
+    logStreamParseError(
+      logger,
+      "provider.messages.openai_compatible.parse_chunk_error",
       data,
       error,
-    })
+    )
     return null
   }
 }
@@ -1035,11 +1042,13 @@ const parseResponsesProviderStreamChunk = (
 
     return parsed
   } catch (error) {
-    logger.error("provider.messages.responses.parse_chunk_error", {
-      provider: providerConfig.name,
+    logStreamParseError(
+      logger,
+      "provider.messages.responses.parse_chunk_error",
       data,
       error,
-    })
+      { provider: providerConfig.name },
+    )
     return null
   }
 }
@@ -1071,10 +1080,12 @@ const parseProviderStreamEvent = (
     }
     return { data: JSON.stringify(parsed), type: parsed.type, usage: {} }
   } catch (error) {
-    logger.error("provider.messages.streaming.adjust_tokens_error", {
+    logStreamParseError(
+      logger,
+      "provider.messages.streaming.adjust_tokens_error",
+      data,
       error,
-      originalData: data,
-    })
+    )
     return null
   }
 }

@@ -166,13 +166,63 @@ export const copilotBaseUrl = (state: State) => {
     return "https://api.githubcopilot.com"
   }
 
-  if (state.copilotApiUrl) {
-    return state.copilotApiUrl
+  const trustedApiUrl = resolveTrustedCopilotApiUrl(state.copilotApiUrl)
+  if (trustedApiUrl) {
+    return trustedApiUrl
   }
 
   return state.accountType === "individual" ?
       "https://api.githubcopilot.com"
     : `https://api.${state.accountType}.githubcopilot.com`
+}
+
+export const resolveTrustedCopilotApiUrl = (
+  candidate: string | null | undefined,
+): string | null => {
+  if (!candidate?.trim()) {
+    return null
+  }
+
+  let url: URL
+  try {
+    url = new URL(candidate)
+  } catch {
+    return null
+  }
+
+  if (
+    url.protocol !== "https:"
+    || url.username
+    || url.password
+    || url.search
+    || url.hash
+  ) {
+    return null
+  }
+
+  const hostname = url.hostname.toLowerCase()
+  const githubCopilotHost =
+    hostname === "githubcopilot.com" || hostname.endsWith(".githubcopilot.com")
+  const enterpriseDomain = getEnterpriseDomain()
+  let enterpriseHost = false
+  if (enterpriseDomain) {
+    try {
+      const configuredHostname = new URL(
+        `https://${enterpriseDomain}`,
+      ).hostname.toLowerCase()
+      enterpriseHost =
+        hostname === configuredHostname
+        || hostname.endsWith(`.${configuredHostname}`)
+    } catch {
+      enterpriseHost = false
+    }
+  }
+
+  if (!githubCopilotHost && !enterpriseHost) {
+    return null
+  }
+
+  return url.toString().replace(/\/+$/u, "")
 }
 
 export const prepareMessageProxyHeaders = (headers: Record<string, string>) => {

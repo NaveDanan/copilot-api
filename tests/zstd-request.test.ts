@@ -1,12 +1,21 @@
 import { describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
-import { zstdDecompressionMiddleware } from "~/lib/zstd-request"
+import {
+  createZstdDecompressionMiddleware,
+  zstdDecompressionMiddleware,
+} from "~/lib/zstd-request"
 
-const createApp = () => {
+const createApp = (
+  options?: Parameters<typeof createZstdDecompressionMiddleware>[0],
+) => {
   const app = new Hono()
 
-  app.use(zstdDecompressionMiddleware)
+  app.use(
+    options ?
+      createZstdDecompressionMiddleware(options)
+    : zstdDecompressionMiddleware,
+  )
   app.post("/echo", async (c) =>
     c.json({
       contentEncoding: c.req.header("content-encoding") ?? null,
@@ -77,5 +86,76 @@ describe("zstd request middleware", () => {
         type: "invalid_request_error",
       },
     })
+  })
+
+  test("rejects compressed request bodies over the configured limit", async () => {
+    const body = await Bun.zstdCompress(JSON.stringify({ ok: true }))
+    const app = createApp({
+      maxCompressedBytes: body.byteLength - 1,
+      maxDecompressedBytes: 1024,
+    })
+
+    const response = await app.request("/echo", {
+      body,
+      headers: {
+        "content-encoding": "zstd",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(413)
+    expect(await response.json()).toEqual({
+      error: {
+        message: "Zstd request body exceeds the configured size limit.",
+        type: "invalid_request_error",
+      },
+    })
+  })
+
+  test("rejects decompressed request bodies over the configured limit", async () => {
+    const body = await Bun.zstdCompress(
+      JSON.stringify({ value: "a".repeat(1024) }),
+    )
+    const app = createApp({
+      maxCompressedBytes: 1024,
+      maxDecompressedBytes: 128,
+    })
+
+    const response = await app.request("/echo", {
+      body,
+      headers: {
+        "content-encoding": "zstd",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(413)
+    expect(await response.json()).toEqual({
+      error: {
+        message: "Zstd request body exceeds the configured size limit.",
+        type: "invalid_request_error",
+      },
+    })
+  })
+
+  test("rejects frames that request a window over the configured limit", async () => {
+    const app = createApp({
+      maxCompressedBytes: 1024,
+      maxDecompressedBytes: 1024,
+    })
+    const body = Uint8Array.from([0x28, 0xb5, 0x2f, 0xfd, 0x00, 0x88])
+
+    const response = await app.request("/echo", {
+      body,
+      headers: {
+        "content-encoding": "zstd",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(413)
   })
 })

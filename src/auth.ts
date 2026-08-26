@@ -509,6 +509,17 @@ export async function runAuthLogin(options: RunAuthOptions): Promise<void> {
   tlsModule.enableSystemCACompat()
 
   if (options.verbose) {
+    consola.warn(
+      "PRIVACY WARNING: --verbose prints detailed OAuth and provider authentication diagnostics to terminal output.",
+    )
+  }
+  if (options.showToken) {
+    consola.warn(
+      "SECURITY WARNING: --show-token prints a reusable GitHub token to terminal output and captured logs.",
+    )
+  }
+
+  if (options.verbose) {
     consola.level = 5
     consola.info("Verbose logging enabled")
   }

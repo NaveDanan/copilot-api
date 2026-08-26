@@ -9,7 +9,11 @@ import {
   resolveEffectiveProviderType,
 } from "~/lib/config"
 import { HTTPError } from "~/lib/error"
-import { createHandlerLogger, debugJson } from "~/lib/logger"
+import {
+  createHandlerLogger,
+  debugJson,
+  logStreamParseError,
+} from "~/lib/logger"
 import { resolveProviderConfig } from "~/lib/provider-resolver"
 import { requestContext } from "~/lib/request-context"
 import {
@@ -345,11 +349,13 @@ const parseProviderResponsesStreamEvent = (
     }
     return parsed
   } catch (error) {
-    logger.error("provider.responses.parse_chunk_error", {
-      provider: options.provider,
+    logStreamParseError(
+      logger,
+      "provider.responses.parse_chunk_error",
       data,
       error,
-    })
+      { provider: options.provider },
+    )
     return null
   }
 }

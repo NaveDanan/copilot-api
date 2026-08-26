@@ -1,7 +1,10 @@
 import consola from "consola"
 import { setTimeout as delay } from "node:timers/promises"
 
-import { isOpencodeOauthApp } from "~/lib/api-config"
+import {
+  isOpencodeOauthApp,
+  resolveTrustedCopilotApiUrl,
+} from "~/lib/api-config"
 import { getRawProviderConfig, setProviderConfig } from "~/lib/config"
 import {
   readCodexCredentials,
@@ -110,7 +113,14 @@ export const applyCopilotTokenResponse = (
   // org entitlement advertise the business host, while the issued token is
   // bound to the enterprise host, causing 421 Misdirected Request).
   if (response.endpoints?.api) {
-    state.copilotApiUrl = response.endpoints.api
+    const trustedApiUrl = resolveTrustedCopilotApiUrl(response.endpoints.api)
+    if (trustedApiUrl) {
+      state.copilotApiUrl = trustedApiUrl
+    } else {
+      consola.warn(
+        "SECURITY WARNING: Ignoring an untrusted Copilot API endpoint returned by token exchange.",
+      )
+    }
   }
 }
 
@@ -358,6 +368,14 @@ export async function logUser() {
   state.userName = copilotUser.login
   consola.info(`Logged in as ${copilotUser.login}`)
 
-  state.copilotApiUrl = copilotUser.endpoints.api
+  const trustedApiUrl = resolveTrustedCopilotApiUrl(copilotUser.endpoints.api)
+  if (trustedApiUrl) {
+    state.copilotApiUrl = trustedApiUrl
+  } else {
+    state.copilotApiUrl = undefined
+    consola.warn(
+      "SECURITY WARNING: Ignoring an untrusted Copilot API endpoint returned by the user API.",
+    )
+  }
   state.tokenBasedBilling = copilotUser.token_based_billing
 }

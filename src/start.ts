@@ -5,15 +5,26 @@ import clipboard from "clipboardy"
 import consola from "consola"
 import { serve, type ServerHandler } from "srvx"
 import invariant from "tiny-invariant"
+import { readFile } from "node:fs/promises"
 
 import { runProviderSetup } from "./auth"
 import { listEnabledProviders, mergeConfigWithDefaults } from "./lib/config"
 import { readGitHubToken } from "./lib/credential-store"
 import { getLatestModelForFamily } from "./lib/models"
+import {
+  assertSafeServerBinding,
+  assertSafeServerTransport,
+  DEFAULT_SERVER_HOST,
+  formatServerUrl,
+  isLoopbackHostname,
+} from "./lib/network-security"
 import { initOpencodeVersion } from "./lib/opencode"
 import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
-import { getMissingApiKeysMessage } from "./lib/request-auth"
+import {
+  getConfiguredApiKeys,
+  getMissingApiKeysMessage,
+} from "./lib/request-auth"
 import { generateEnvScript } from "./lib/shell"
 import { state } from "./lib/state"
 import { logUser, setupCopilotToken } from "./lib/token"
@@ -26,12 +37,74 @@ import {
 } from "./services/vscode-env"
 
 interface RunServerOptions {
+  host: string
   port: number
   verbose: boolean
   githubToken?: string
   claudeCode: boolean
   showToken: boolean
   proxyEnv: boolean
+  allowInsecureHttp: boolean
+  tlsCert?: string
+  tlsKey?: string
+}
+
+export interface StartupSecurityOptions {
+  githubToken?: string
+  proxyEnv: boolean
+  showToken: boolean
+  verbose: boolean
+}
+
+export function getStartupSecurityWarnings(
+  options: StartupSecurityOptions,
+): Array<string> {
+  return [
+    ...(options.githubToken?.trim() ?
+      [
+        "SECURITY WARNING: --github-token exposes a long-lived credential through process arguments and shell history. Prefer `copilot-api auth login`.",
+      ]
+    : []),
+    ...(options.showToken ?
+      [
+        "SECURITY WARNING: --show-token prints live GitHub, Copilot, and Codex tokens to terminal output and captured logs.",
+      ]
+    : []),
+    ...(options.verbose ?
+      [
+        "PRIVACY WARNING: --verbose writes complete prompts, responses, tool payloads, and stream events to local log files for up to 7 days.",
+      ]
+    : []),
+    ...(options.proxyEnv ?
+      [
+        "SECURITY WARNING: --proxy-env allows the configured proxy and trusted interception CAs to observe provider credentials and chat traffic.",
+      ]
+    : []),
+  ]
+}
+
+export async function resolveServerTls(
+  tlsCert: string | undefined,
+  tlsKey: string | undefined,
+): Promise<{ cert: string; key: string } | undefined> {
+  const certPath = tlsCert?.trim()
+  const keyPath = tlsKey?.trim()
+  if (Boolean(certPath) !== Boolean(keyPath)) {
+    throw new Error("--tls-cert and --tls-key must be configured together")
+  }
+  if (!certPath || !keyPath) {
+    return undefined
+  }
+
+  const [cert, key] = await Promise.all([
+    readFile(certPath, "utf8"),
+    readFile(keyPath, "utf8"),
+  ])
+  if (!cert.trim() || !key.trim()) {
+    throw new Error("TLS certificate and private key files must not be empty")
+  }
+
+  return { cert, key }
 }
 
 async function setupCopilotMode(
@@ -45,6 +118,9 @@ async function setupCopilotMode(
     fromCli ?
       "Using provided GitHub token"
     : "Using GitHub token from local file",
+  )
+  consola.warn(
+    "PRIVACY NOTICE: Copilot mode sends a persistent VS Code device ID and a hashed machine identifier to GitHub Copilot.",
   )
 
   await logUser()
@@ -155,7 +231,24 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   consola.options.throttle = 0
 
+  for (const warning of getStartupSecurityWarnings(options)) {
+    consola.warn(warning)
+  }
+
   mergeConfigWithDefaults()
+  const hostname = options.host.trim()
+  assertSafeServerBinding(hostname, getConfiguredApiKeys())
+  const serverTls = await resolveServerTls(options.tlsCert, options.tlsKey)
+  assertSafeServerTransport(
+    hostname,
+    Boolean(serverTls),
+    options.allowInsecureHttp,
+  )
+  if (!serverTls && !isLoopbackHostname(hostname)) {
+    consola.warn(
+      "SECURITY WARNING: --allow-insecure-http exposes API keys, prompts, and responses to network interception. Use --tls-cert and --tls-key for remote access.",
+    )
+  }
 
   const missingApiKeysMessage = getMissingApiKeysMessage()
   if (missingApiKeysMessage) {
@@ -178,13 +271,13 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   await ensurePaths()
 
-  const serverUrl = `http://localhost:${options.port}`
+  const serverUrl = formatServerUrl(hostname, options.port, Boolean(serverTls))
 
-  const githubToken = options.githubToken || (await readGitHubToken())
+  const githubToken = options.githubToken?.trim() || (await readGitHubToken())
   if (githubToken) {
     await setupCopilotMode(
       githubToken,
-      Boolean(options.githubToken),
+      Boolean(options.githubToken?.trim()),
       serverUrl,
       options.claudeCode,
     )
@@ -200,7 +293,9 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   serve({
     fetch: server.fetch as ServerHandler,
+    hostname,
     port: options.port,
+    tls: serverTls,
     bun: {
       idleTimeout: 0,
     },
@@ -213,6 +308,11 @@ export const start = defineCommand({
     description: "Start the Copilot API server",
   },
   args: {
+    host: {
+      type: "string",
+      default: DEFAULT_SERVER_HOST,
+      description: "Host to listen on; non-loopback hosts require auth.apiKeys",
+    },
     port: {
       alias: "p",
       type: "string",
@@ -248,15 +348,33 @@ export const start = defineCommand({
       default: false,
       description: "Initialize proxy from environment variables",
     },
+    "allow-insecure-http": {
+      type: "boolean",
+      default: false,
+      description:
+        "Allow plaintext HTTP on non-loopback hosts (exposes credentials and chats to network interception)",
+    },
+    "tls-cert": {
+      type: "string",
+      description: "Path to a TLS certificate PEM file",
+    },
+    "tls-key": {
+      type: "string",
+      description: "Path to a TLS private-key PEM file",
+    },
   },
   run({ args }) {
     return runServer({
+      host: args.host,
       port: Number.parseInt(args.port, 10),
       verbose: args.verbose,
       githubToken: args["github-token"],
       claudeCode: args["claude-code"],
       showToken: args["show-token"],
       proxyEnv: args["proxy-env"],
+      allowInsecureHttp: args["allow-insecure-http"],
+      tlsCert: args["tls-cert"],
+      tlsKey: args["tls-key"],
     })
   },
 })

@@ -1,6 +1,7 @@
 import type { Context, MiddlewareHandler } from "hono"
 
 import consola from "consola"
+import { createHash, timingSafeEqual } from "node:crypto"
 
 import { getConfig } from "./config"
 
@@ -99,6 +100,24 @@ function createUnauthorizedResponse(c: Context): Response {
   )
 }
 
+export function matchesConfiguredApiKey(
+  requestApiKey: string,
+  configuredApiKeys: Array<string>,
+): boolean {
+  const requestDigest = createHash("sha256").update(requestApiKey).digest()
+  let matchFound = false
+
+  for (const configuredApiKey of configuredApiKeys) {
+    const configuredDigest = createHash("sha256")
+      .update(configuredApiKey)
+      .digest()
+    const matches = timingSafeEqual(requestDigest, configuredDigest)
+    matchFound = matches || matchFound
+  }
+
+  return matchFound
+}
+
 export function createAuthMiddleware(
   options: AuthMiddlewareOptions = {},
 ): MiddlewareHandler {
@@ -127,7 +146,7 @@ export function createAuthMiddleware(
     }
 
     const requestApiKey = extractRequestApiKey(c)
-    if (!requestApiKey || !apiKeys.includes(requestApiKey)) {
+    if (!requestApiKey || !matchesConfiguredApiKey(requestApiKey, apiKeys)) {
       return createUnauthorizedResponse(c)
     }
 

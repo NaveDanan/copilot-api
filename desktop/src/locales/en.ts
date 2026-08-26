@@ -168,7 +168,7 @@ const en: Locale = {
       'Used for /admin/* endpoints. Leave empty to remove it; the next server start generates a new one automatically.',
     sectionNetwork: 'Network',
     proxySystemNote:
-      'System proxy is used by default. When custom proxy is selected, Electron and newly started local services use the settings below; when no proxy is selected, network requests connect directly. Restart any running service to apply changes.',
+      'System proxy is used by default. System or custom proxies with a trusted interception certificate can inspect provider credentials and chat traffic. When no proxy is selected, requests connect directly. Restart any running service to apply changes.',
     proxyMode: 'Proxy mode',
     proxyModeSystem: 'System proxy',
     proxyModeCustom: 'Custom proxy',
@@ -189,9 +189,11 @@ const en: Locale = {
     enterpriseUrlDesc:
       'Optional value such as company.ghe.com for GitHub Enterprise.',
     verbose: 'Verbose logging',
-    verboseDesc: 'Output more detailed debug information',
+    verboseDesc:
+      'Writes complete prompts, responses, and tool payloads to local logs for up to 7 days.',
     showToken: 'Show token',
-    showTokenDesc: 'Print GitHub/Copilot token values in logs',
+    showTokenDesc:
+      'Prints live GitHub, Copilot, and Codex tokens in logs. Anyone with log access can reuse them.',
     sectionLanguage: 'Language',
     langAuto: 'Follow system',
     langEn: 'English',

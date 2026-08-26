@@ -1,6 +1,12 @@
 import fs from 'node:fs/promises'
 
-import { ipcMain, shell, BrowserWindow } from 'electron'
+import {
+  ipcMain,
+  shell,
+  BrowserWindow,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
+} from 'electron'
 
 import { normalizeApiKeys } from '../../src/lib/request-auth'
 import { PATHS } from '../../src/lib/paths'
@@ -30,6 +36,7 @@ import {
 } from './server-manager'
 import { readSettings, writeSettings } from './settings-store'
 import { runSettingsTransaction } from './settings-transaction'
+import { isSafeExternalUrl, isTrustedRendererUrl } from './renderer-security'
 import {
   readServerKeysConfig,
   writeServerKeysConfig,
@@ -53,6 +60,7 @@ interface ConfigApiErrorResponse {
 type ServerAuthScope = 'default' | 'admin'
 
 interface IpcHandlersOptions {
+  trustedRendererUrl: string
   getEffectiveProxySettings?: (
     settings: DesktopSettings,
   ) => DesktopProxySettings
@@ -65,6 +73,22 @@ interface IpcHandlersOptions {
     prevSettings: DesktopSettings,
   ) => void | Promise<void>
   onQuit?: () => void | Promise<void>
+}
+
+function assertTrustedIpcSender(
+  event: IpcMainEvent | IpcMainInvokeEvent,
+  mainWindow: BrowserWindow,
+  trustedRendererUrl: string,
+): void {
+  const senderFrame = event.senderFrame
+  if (
+    event.sender !== mainWindow.webContents
+    || senderFrame !== mainWindow.webContents.mainFrame
+    || !senderFrame
+    || !isTrustedRendererUrl(senderFrame.url, trustedRendererUrl)
+  ) {
+    throw new Error('Blocked IPC request from an untrusted renderer')
+  }
 }
 
 function normalizeApiKey(apiKey: unknown): string | null {
@@ -171,12 +195,34 @@ async function saveModelMappingsViaApi(
 
 export function registerIpcHandlers(
   mainWindow: BrowserWindow,
-  options: IpcHandlersOptions = {},
+  options: IpcHandlersOptions,
 ): void {
-  ipcMain.handle('auth:get-status', async () => getDesktopAuthStatus())
+  const handle = <TArguments extends Array<unknown>, TResult>(
+    channel: string,
+    listener: (
+      event: IpcMainInvokeEvent,
+      ...args: TArguments
+    ) => TResult | Promise<TResult>,
+  ): void => {
+    ipcMain.handle(channel, (event, ...args) => {
+      assertTrustedIpcSender(event, mainWindow, options.trustedRendererUrl)
+      return listener(event, ...(args as TArguments))
+    })
+  }
+  const on = <TArguments extends Array<unknown>>(
+    channel: string,
+    listener: (event: IpcMainEvent, ...args: TArguments) => void,
+  ): void => {
+    ipcMain.on(channel, (event, ...args) => {
+      assertTrustedIpcSender(event, mainWindow, options.trustedRendererUrl)
+      listener(event, ...(args as TArguments))
+    })
+  }
+
+  handle('auth:get-status', async () => getDesktopAuthStatus())
 
   // Auth: Start the OAuth device flow
-  ipcMain.handle('auth:get-device-code', async () => {
+  handle('auth:get-device-code', async () => {
     const deviceCode = await getDeviceCode()
     // Poll in the background and notify the renderer when the token arrives
     pollAccessToken(deviceCode)
@@ -208,7 +254,7 @@ export function registerIpcHandlers(
   })
 
   // Auth: Save token directly
-  ipcMain.handle('auth:save-token', async (_event, token: string) => {
+  handle('auth:save-token', async (_event, token: string) => {
     try {
       const [, accountType] = await Promise.all([
         getGitHubUser(token),
@@ -225,9 +271,9 @@ export function registerIpcHandlers(
   })
 
   // Auth: Check the saved token
-  ipcMain.handle('auth:check-saved', async () => getDesktopAuthStatus())
+  handle('auth:check-saved', async () => getDesktopAuthStatus())
 
-  ipcMain.handle(
+  handle(
     'auth:configure-provider',
     async (_event, input: ProviderAuthInput) => {
       try {
@@ -238,13 +284,18 @@ export function registerIpcHandlers(
     },
   )
 
-  ipcMain.handle(
+  handle(
     'auth:start-codex-login',
     async (_event, callbackUrlOrCode?: string) => {
       try {
         return await loginCodexForDesktop({
           callbackUrlOrCode,
-          openUrl: (url) => shell.openExternal(url),
+          openUrl: (url) => {
+            if (!isSafeExternalUrl(url)) {
+              throw new Error('Refusing to open an unsafe authentication URL')
+            }
+            return shell.openExternal(url)
+          },
         })
       } catch (err) {
         return { success: false, mode: 'none', error: (err as Error).message }
@@ -253,12 +304,12 @@ export function registerIpcHandlers(
   )
 
   // Auth: Log out
-  ipcMain.handle('auth:logout', async () => {
+  handle('auth:logout', async () => {
     await clearToken()
   })
 
   // Server: Start
-  ipcMain.handle(
+  handle(
     'server:start',
     async (_event, port: number, authMode?: DesktopAuthMode) => {
       const token = await readToken()
@@ -283,23 +334,23 @@ export function registerIpcHandlers(
       // Persist the last used port
       await writeSettings({ ...settings, lastPort: port })
 
-      return startServer(port, tokenForStart, serverOptions)
+      return startServer(port, serverOptions)
     },
   )
 
   // Server: Stop
-  ipcMain.handle('server:stop', async () => {
+  handle('server:stop', async () => {
     await stopServer()
   })
 
-  ipcMain.handle('server:get-status', () => ({
+  handle('server:get-status', () => ({
     running: isRunning(),
     port: getPort(),
   }))
 
   // Settings
-  ipcMain.handle('settings:get', async () => readSettings())
-  ipcMain.handle('settings:save', async (_event, settings: DesktopSettings) => {
+  handle('settings:get', async () => readSettings())
+  handle('settings:save', async (_event, settings: DesktopSettings) => {
     const prev = await readSettings()
     await runSettingsTransaction(
       () => options.onBeforeSettingsSave?.(settings, prev),
@@ -310,29 +361,29 @@ export function registerIpcHandlers(
       await options.onSettingsChange(settings, prev)
     }
   })
-  ipcMain.handle('config:get-model-mappings', async () =>
-    fetchModelMappingsConfig(),
-  )
-  ipcMain.handle(
+  handle('config:get-model-mappings', async () => fetchModelMappingsConfig())
+  handle(
     'config:save-model-mappings',
     async (_event, modelMappings: Record<string, string>) => {
       await saveModelMappingsViaApi(modelMappings)
     },
   )
 
-  ipcMain.handle('auth:get-server-keys', () => readServerKeysConfig())
-  ipcMain.handle(
-    'auth:save-server-keys',
-    (_event, keys: ServerKeysConfigUpdate) => writeServerKeysConfig(keys),
+  handle('auth:get-server-keys', () => readServerKeysConfig())
+  handle('auth:save-server-keys', (_event, keys: ServerKeysConfigUpdate) =>
+    writeServerKeysConfig(keys),
   )
 
   // Shell: Open the system browser
-  ipcMain.handle('shell:open-url', async (_event, url: string) => {
+  handle('shell:open-url', async (_event, url: string) => {
+    if (!isSafeExternalUrl(url)) {
+      throw new Error('Refusing to open an unsafe external URL')
+    }
     await shell.openExternal(url)
   })
 
   // Server: Proxy HTTP requests through the main process to bypass file:// origin CORS in the renderer
-  ipcMain.handle('server:fetch-usage', async () => {
+  handle('server:fetch-usage', async () => {
     const port = getPort()
     try {
       const headers = await getServerRequestHeaders()
@@ -347,7 +398,7 @@ export function registerIpcHandlers(
     }
   })
 
-  ipcMain.handle('server:fetch-models', async () => {
+  handle('server:fetch-models', async () => {
     const port = getPort()
     try {
       const headers = await getServerRequestHeaders()
@@ -362,7 +413,7 @@ export function registerIpcHandlers(
     }
   })
 
-  ipcMain.handle('server:fetch-token-usage', async (_event, period: string) => {
+  handle('server:fetch-token-usage', async (_event, period: string) => {
     const port = getPort()
     const normalizedPeriod =
       period === 'week' || period === 'month' ? period : 'day'
@@ -382,30 +433,27 @@ export function registerIpcHandlers(
     }
   })
 
-  ipcMain.handle(
-    'server:fetch-token-usage-daily',
-    async (_event, period: string) => {
-      const port = getPort()
-      const normalizedPeriod =
-        period === 'week' || period === 'month' ? period : 'day'
-      try {
-        const headers = await getServerRequestHeaders()
-        const res = await fetch(
-          `http://localhost:${port}/token-usage/daily?period=${normalizedPeriod}`,
-          {
-            headers,
-            signal: AbortSignal.timeout(5000),
-          },
-        )
-        if (!res.ok) return null
-        return (await res.json()) as unknown
-      } catch {
-        return null
-      }
-    },
-  )
+  handle('server:fetch-token-usage-daily', async (_event, period: string) => {
+    const port = getPort()
+    const normalizedPeriod =
+      period === 'week' || period === 'month' ? period : 'day'
+    try {
+      const headers = await getServerRequestHeaders()
+      const res = await fetch(
+        `http://localhost:${port}/token-usage/daily?period=${normalizedPeriod}`,
+        {
+          headers,
+          signal: AbortSignal.timeout(5000),
+        },
+      )
+      if (!res.ok) return null
+      return (await res.json()) as unknown
+    } catch {
+      return null
+    }
+  })
 
-  ipcMain.handle(
+  handle(
     'server:fetch-token-usage-events',
     async (_event, period: string, page: number, pageSize: number) => {
       const port = getPort()
@@ -437,34 +485,34 @@ export function registerIpcHandlers(
     },
   )
 
-  ipcMain.handle('server:get-auth-info', async () => getServerAuthInfo())
+  handle('server:get-auth-info', async () => getServerAuthInfo())
 
   // Server: Return the in-memory log buffer
-  ipcMain.handle('server:get-logs', () => getLogs())
+  handle('server:get-logs', () => getLogs())
 
   // Window controls (used by the custom title bar menu)
-  ipcMain.on('window:reload', () => mainWindow.reload())
-  ipcMain.on('window:minimize', () => mainWindow.minimize())
-  ipcMain.on('window:maximize-toggle', () => {
+  on('window:reload', () => mainWindow.reload())
+  on('window:minimize', () => mainWindow.minimize())
+  on('window:maximize-toggle', () => {
     if (mainWindow.isMaximized()) {
       mainWindow.unmaximize()
     } else {
       mainWindow.maximize()
     }
   })
-  ipcMain.on('window:close', () => mainWindow.close())
-  ipcMain.on('window:quit', () => {
+  on('window:close', () => mainWindow.close())
+  on('window:quit', () => {
     void options.onQuit?.()
   })
-  ipcMain.on('window:zoom-in', () => {
+  on('window:zoom-in', () => {
     const level = mainWindow.webContents.getZoomLevel()
     mainWindow.webContents.setZoomLevel(level + 0.5)
   })
-  ipcMain.on('window:zoom-out', () => {
+  on('window:zoom-out', () => {
     const level = mainWindow.webContents.getZoomLevel()
     mainWindow.webContents.setZoomLevel(level - 0.5)
   })
-  ipcMain.on('window:zoom-reset', () => mainWindow.webContents.setZoomLevel(0))
+  on('window:zoom-reset', () => mainWindow.webContents.setZoomLevel(0))
 
-  ipcMain.handle('window:is-maximized', () => mainWindow.isMaximized())
+  handle('window:is-maximized', () => mainWindow.isMaximized())
 }

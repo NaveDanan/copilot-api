@@ -34,10 +34,13 @@ export async function pollAccessToken(
       continue
     }
 
-    const json = await response.json()
-    consola.debug("Polling access token response:", json)
-
-    const { access_token } = json as AccessTokenResponse
+    const json = (await response.json()) as AccessTokenResponse
+    const { access_token, scope, token_type } = json
+    consola.debug("Polling access token response received", {
+      hasAccessToken: Boolean(access_token),
+      scope,
+      tokenType: token_type,
+    })
 
     if (access_token) {
       return access_token

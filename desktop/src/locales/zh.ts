@@ -162,7 +162,7 @@ const zh: Locale = {
       '用于 /admin/* 接口。留空会移除该字段，下次启动服务时自动生成新的。',
     sectionNetwork: '网络',
     proxySystemNote:
-      '默认使用系统代理。选择自定义代理后，Electron 和新启动的本地服务会使用下方配置；选择不使用代理后将直连网络。已运行的服务需重启后生效。',
+      '默认使用系统代理。安装了受信任拦截证书的系统或自定义代理可以查看 provider 凭据和聊天流量；选择不使用代理后将直连网络。已运行的服务需重启后生效。',
     proxyMode: '代理模式',
     proxyModeSystem: '系统代理',
     proxyModeCustom: '自定义代理',
@@ -182,9 +182,11 @@ const zh: Locale = {
     enterpriseUrlDesc:
       '可选，例如 company.ghe.com。用于连接 GitHub Enterprise。',
     verbose: '详细日志',
-    verboseDesc: '输出更详细的调试信息',
+    verboseDesc:
+      '会将完整提示词、响应和工具载荷写入本地日志，并保留最多 7 天。',
     showToken: '显示 Token',
-    showTokenDesc: '在日志中打印 GitHub/Copilot Token 值',
+    showTokenDesc:
+      '会在日志中打印有效的 GitHub、Copilot 和 Codex Token；任何可读取日志的人都能复用。',
     sectionLanguage: '语言',
     langAuto: '跟随系统',
     langEn: 'English',

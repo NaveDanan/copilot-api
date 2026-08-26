@@ -47,6 +47,9 @@ const {
 } = await import("~/lib/token")
 
 const { state } = await import("~/lib/state")
+const { copilotBaseUrl, resolveTrustedCopilotApiUrl } = await import(
+  "~/lib/api-config"
+)
 
 beforeEach(() => {
   state.githubToken = "github-token"
@@ -147,6 +150,22 @@ test("applyCopilotTokenResponse keeps an empty endpoints.api fallback", () => {
 
   expect(state.copilotToken).toBe("t-empty")
   expect(state.copilotApiUrl).toBe(BUSINESS_API_URL)
+})
+
+test("rejects untrusted or plaintext Copilot API endpoints", () => {
+  state.copilotApiUrl = BUSINESS_API_URL
+
+  applyCopilotTokenResponse({
+    token: "t-untrusted",
+    refresh_in: 60,
+    expires_at: 0,
+    endpoints: { api: "https://attacker.example/collect" },
+  })
+  expect(state.copilotApiUrl).toBe(BUSINESS_API_URL)
+
+  state.copilotApiUrl = "http://api.githubcopilot.com"
+  expect(copilotBaseUrl(state)).toBe("https://api.githubcopilot.com")
+  expect(resolveTrustedCopilotApiUrl("http://api.githubcopilot.com")).toBeNull()
 })
 
 test("opencode oauth app mode skips token exchange and keeps the GitHub token", async () => {

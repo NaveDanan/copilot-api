@@ -18,6 +18,15 @@ import { type AnthropicMessagesPayload } from "~/lib/types/anthropic"
 import { translateToOpenAI } from "./non-stream-translation"
 import { normalizeSystemMessages } from "./preprocess"
 
+export const ANTHROPIC_TOKEN_COUNT_PRIVACY_WARNING =
+  "PRIVACY WARNING: Anthropic token counting sends the complete system prompt, messages, and tool schemas to api.anthropic.com."
+
+export function warnAnthropicTokenCountDisclosure(
+  logger: { warn: (message: string) => void } = consola,
+): void {
+  logger.warn(ANTHROPIC_TOKEN_COUNT_PRIVACY_WARNING)
+}
+
 export const resolveCountTokensModel = (
   modelId: string,
   findModel: (sdkModelId: string) => Model | undefined = findEndpointModel,
@@ -48,6 +57,8 @@ async function countTokensViaAnthropic(
 
   const apiKey = getAnthropicApiKey()
   if (!apiKey) return null
+
+  warnAnthropicTokenCountDisclosure()
 
   // Copilot uses dotted names (claude-opus-4.6) but Anthropic requires dashes (claude-opus-4-6)
   const model = payload.model.replaceAll(".", "-")
@@ -84,9 +95,9 @@ async function countTokensViaAnthropic(
 /**
  * Handles token counting for Anthropic messages.
  *
- * When an Anthropic API key is available (via config or ANTHROPIC_API_KEY env var)
- * and the model is a Claude model, forwards to Anthropic's free /v1/messages/count_tokens
- * endpoint for accurate counts. Otherwise falls back to GPT tokenizer estimation.
+ * When an Anthropic API key is explicitly configured and the model is a Claude
+ * model, forwards to Anthropic's free /v1/messages/count_tokens endpoint for
+ * accurate counts. Otherwise falls back to GPT tokenizer estimation.
  */
 export async function handleCountTokens(c: Context) {
   const anthropicPayload = await c.req.json<AnthropicMessagesPayload>()

@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, test } from "bun:test"
 import { Hono } from "hono"
 
-import { createAuthMiddleware } from "~/lib/request-auth"
+import {
+  createAuthMiddleware,
+  matchesConfiguredApiKey,
+} from "~/lib/request-auth"
 
 let regularApiKeys: Array<string>
 let adminApiKeys: Array<string>
@@ -40,6 +43,16 @@ beforeEach(() => {
 })
 
 describe("request auth middleware", () => {
+  test("matches configured API keys without prefix or length ambiguity", () => {
+    expect(
+      matchesConfiguredApiKey("regular-key", ["other", "regular-key"]),
+    ).toBeTrue()
+    expect(matchesConfiguredApiKey("regular", ["regular-key"])).toBeFalse()
+    expect(
+      matchesConfiguredApiKey("regular-key-extra", ["regular-key"]),
+    ).toBeFalse()
+  })
+
   test("accepts regular api keys for protected non-admin routes", async () => {
     const app = createApp()
     const response = await app.request("/models", {

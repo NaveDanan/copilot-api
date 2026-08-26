@@ -209,7 +209,10 @@ const getLogStream = (filePath: string): fs.WriteStream => {
 
   let stream = logStreams.get(filePath)
   if (!stream || stream.destroyed) {
-    const createdStream = fs.createWriteStream(filePath, { flags: "a" })
+    const createdStream = fs.createWriteStream(filePath, {
+      flags: "a",
+      mode: 0o600,
+    })
     stream = createdStream
     logStreams.set(filePath, createdStream)
 
@@ -238,6 +241,7 @@ const appendLine = (filePath: string, line: string) => {
 }
 
 type DebugLogger = Pick<ConsolaInstance, "debug">
+type StreamParseErrorLogger = Pick<ConsolaInstance, "debug" | "error">
 
 type AsyncDebugValueFactory = () => Promise<unknown>
 
@@ -278,6 +282,21 @@ export const debugJsonTail = (
   { value, tailLength = 400 }: { value: unknown; tailLength?: number },
 ): void => {
   debugLazy(logger, () => [label, JSON.stringify(value).slice(-tailLength)])
+}
+
+export const logStreamParseError = (
+  logger: StreamParseErrorLogger,
+  label: string,
+  rawData: string,
+  error: unknown,
+  details: Record<string, unknown> = {},
+): void => {
+  logger.error(label, {
+    ...details,
+    error,
+    rawDataLength: rawData.length,
+  })
+  debugLazy(logger, () => [`${label}.raw_data`, rawData])
 }
 
 export const createHandlerLogger = (name: string): ConsolaInstance => {

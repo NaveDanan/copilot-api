@@ -490,8 +490,7 @@ const positiveIntegerOrDefault = (value: unknown, fallback: number): number => {
 }
 
 export function getAnthropicApiKey(): string | undefined {
-  const config = getConfig()
-  return config.anthropicApiKey ?? process.env.ANTHROPIC_API_KEY ?? undefined
+  return getConfig().anthropicApiKey?.trim() || undefined
 }
 
 export function isResponsesApiWebSearchEnabled(): boolean {

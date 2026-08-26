@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  getInsecureProviderWarning,
+  inspectProviderBaseUrl,
   resolveProviderAuthType,
   type ResolvedProviderConfig,
 } from "~/lib/config"
@@ -72,6 +74,41 @@ describe("buildProviderUpstreamHeaders", () => {
       accept: "application/json",
       authorization: "Bearer provider-key",
     })
+  })
+})
+
+describe("inspectProviderBaseUrl", () => {
+  test("accepts HTTPS and loopback HTTP providers", () => {
+    expect(inspectProviderBaseUrl("https://api.example.com/v1/")).toEqual({
+      baseUrl: "https://api.example.com/v1",
+      insecureRemoteHttp: false,
+    })
+    expect(inspectProviderBaseUrl("http://127.0.0.1:8080/v1")).toEqual({
+      baseUrl: "http://127.0.0.1:8080/v1",
+      insecureRemoteHttp: false,
+    })
+  })
+
+  test("classifies remote HTTP and rejects unsafe URL forms", () => {
+    const insecureProvider = inspectProviderBaseUrl("http://api.example.com/v1")
+    expect(insecureProvider).toEqual({
+      baseUrl: "http://api.example.com/v1",
+      insecureRemoteHttp: true,
+    })
+    expect(getInsecureProviderWarning("custom", insecureProvider)).toContain(
+      "API key, prompts, and responses can be intercepted",
+    )
+    expect(
+      getInsecureProviderWarning(
+        "custom",
+        inspectProviderBaseUrl("https://api.example.com/v1"),
+      ),
+    ).toBeNull()
+    expect(inspectProviderBaseUrl("file:///tmp/provider")).toBeNull()
+    expect(inspectProviderBaseUrl("https://key@example.com/v1")).toBeNull()
+    expect(
+      inspectProviderBaseUrl("https://example.com/v1?key=value"),
+    ).toBeNull()
   })
 })
 

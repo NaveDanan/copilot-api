@@ -5,16 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Copilot API Usage Dashboard</title>
 
-    <script src="https://cdn.tailwindcss.com"></script>
-
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
-
-    <script src="https://unpkg.com/lucide@0.378.0/dist/umd/lucide.min.js"></script>
+    <link rel="stylesheet" href="/usage-viewer/usage-viewer.css" />
 
     <style>
       :root {
@@ -56,7 +47,9 @@
       }
 
       body {
-        font-family: "Inter", sans-serif;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
         background-color: #eef2f7;
         color: var(--color-fg-light);
       }
@@ -462,7 +455,10 @@
           fetchButton.style.backgroundColor = "var(--color-blue)";
         });
 
-        const DEFAULT_ENDPOINT = "http://localhost:4141/usage";
+        const DEFAULT_ENDPOINT = new URL(
+          "/usage",
+          window.location.origin
+        ).toString();
         const DEFAULT_TOKEN_USAGE_PERIOD = "day";
         const DEFAULT_TOKEN_USAGE_EVENTS_PAGE_SIZE = 20;
         const ALL_METRICS_VALUE = "__all__";
@@ -502,13 +498,44 @@
 
         // --- Rendering Logic ---
 
-        /**
-         * Safely calls lucide.createIcons() if the library is available.
-         */
+        const ICON_PATHS = {
+          "alert-triangle":
+            '<path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+          database:
+            '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"/>',
+          "file-text":
+            '<path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><line x1="10" x2="8" y1="9" y2="9"/>',
+          gauge:
+            '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
+          info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+          "refresh-cw":
+            '<path d="M21 12a9 9 0 0 0-15-6.7L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15 6.7L21 16"/><path d="M16 16h5v5"/>',
+        };
+
         function createIcons() {
-          if (typeof lucide !== "undefined") {
-            lucide.createIcons();
-          }
+          document.querySelectorAll("[data-lucide]").forEach((placeholder) => {
+            const iconName = placeholder.getAttribute("data-lucide");
+            const iconPaths = ICON_PATHS[iconName];
+            if (!iconPaths) return;
+
+            const icon = document.createElementNS(
+              "http://www.w3.org/2000/svg",
+              "svg"
+            );
+            icon.setAttribute("viewBox", "0 0 24 24");
+            icon.setAttribute("fill", "none");
+            icon.setAttribute("stroke", "currentColor");
+            icon.setAttribute("stroke-width", "2");
+            icon.setAttribute("stroke-linecap", "round");
+            icon.setAttribute("stroke-linejoin", "round");
+            icon.setAttribute("aria-hidden", "true");
+            icon.setAttribute("focusable", "false");
+            icon.setAttribute("class", placeholder.getAttribute("class") || "");
+            const style = placeholder.getAttribute("style");
+            if (style) icon.setAttribute("style", style);
+            icon.innerHTML = iconPaths;
+            placeholder.replaceWith(icon);
+          });
         }
 
         function escapeHtml(value) {
@@ -572,7 +599,7 @@
             return "";
           }
           try {
-            return window.localStorage.getItem(storageKey) || "";
+            return window.sessionStorage.getItem(storageKey) || "";
           } catch (error) {
             console.warn(
               "Could not read stored credential:",
@@ -588,7 +615,8 @@
             return;
           }
           try {
-            window.localStorage.setItem(storageKey, value);
+            window.sessionStorage.setItem(storageKey, value);
+            window.localStorage.removeItem(storageKey);
           } catch (error) {
             console.warn(
               "Could not store credential:",
@@ -603,6 +631,7 @@
             return;
           }
           try {
+            window.sessionStorage.removeItem(storageKey);
             window.localStorage.removeItem(storageKey);
           } catch (error) {
             console.warn(
@@ -630,9 +659,17 @@
               const legacyValue = window.localStorage.getItem(
                 LEGACY_API_KEY_STORAGE_KEY
               );
-              if (legacyValue && !window.localStorage.getItem(storageKey)) {
-                window.localStorage.setItem(storageKey, legacyValue);
+              const storedValue = window.localStorage.getItem(storageKey);
+              if (
+                (storedValue || legacyValue)
+                && !window.sessionStorage.getItem(storageKey)
+              ) {
+                window.sessionStorage.setItem(
+                  storageKey,
+                  storedValue || legacyValue
+                );
               }
+              window.localStorage.removeItem(storageKey);
             } catch (error) {
               console.warn(
                 "Could not migrate legacy credential:",
@@ -694,7 +731,23 @@
           };
         }
 
-        function buildRequestHeaders() {
+        function resolveSameOriginUrl(value) {
+          const url = new URL(value, window.location.origin);
+          if (
+            url.origin !== window.location.origin
+            || url.username
+            || url.password
+          ) {
+            throw new Error(
+              "Usage Viewer only connects to this gateway's origin."
+            );
+          }
+          url.hash = "";
+          return url;
+        }
+
+        function buildRequestHeaders(url) {
+          resolveSameOriginUrl(url);
           const headers = {};
           const credential = parseCredential(apiKeyInput.value);
           if (credential) {
@@ -704,11 +757,11 @@
         }
 
         function resolveUsageUrl(endpoint) {
-          return new URL(endpoint, window.location.href).toString();
+          return resolveSameOriginUrl(endpoint).toString();
         }
 
         function deriveEndpointUrl(usageEndpoint, targetPath) {
-          const url = new URL(usageEndpoint, window.location.href);
+          const url = resolveSameOriginUrl(usageEndpoint);
           const normalizedTargetPath = targetPath.replace(/^\/+/, "");
           const normalizedPath = url.pathname.replace(/\/+$/, "");
           const nextPath = normalizedPath.endsWith("/usage")
@@ -749,8 +802,11 @@
         }
 
         async function fetchJson(url) {
-          const response = await fetch(url, {
-            headers: buildRequestHeaders(),
+          const requestUrl = resolveSameOriginUrl(url).toString();
+          const response = await fetch(requestUrl, {
+            headers: buildRequestHeaders(requestUrl),
+            redirect: "error",
+            referrerPolicy: "no-referrer",
           });
 
           if (!response.ok) {
@@ -794,7 +850,10 @@
             const period = getSelectedPeriod();
 
             if (endpoint) {
-              currentUrl.searchParams.set("endpoint", endpoint);
+              currentUrl.searchParams.set(
+                "endpoint",
+                resolveUsageUrl(endpoint)
+              );
             } else {
               currentUrl.searchParams.delete("endpoint");
             }
@@ -953,7 +1012,7 @@
             contentArea.innerHTML = renderTokenUsageSection();
           }
 
-          // Replace placeholder icons with actual Lucide icons
+          // Replace placeholder elements with local SVG icons.
           createIcons();
         }
 
@@ -1010,15 +1069,36 @@
           const { entitlement, remaining, percent_remaining, unlimited } =
             details;
 
-          const percentUsed = unlimited ? 0 : 100 - percent_remaining;
-          const used = unlimited
+          const hasUnlimitedQuota = unlimited === true;
+          const entitlementValue = Number(entitlement);
+          const remainingValue = Number(remaining);
+          const percentRemainingValue = Number(percent_remaining);
+          const safeEntitlement = Number.isFinite(entitlementValue)
+            ? entitlementValue
+            : 0;
+          const safeRemaining = Number.isFinite(remainingValue)
+            ? remainingValue
+            : 0;
+          const safePercentRemaining = Number.isFinite(percentRemainingValue)
+            ? percentRemainingValue
+            : 0;
+          const percentUsed = hasUnlimitedQuota
+            ? 0
+            : Math.min(100, Math.max(0, 100 - safePercentRemaining));
+          const used = hasUnlimitedQuota
             ? "N/A"
-            : (entitlement - remaining).toLocaleString();
+            : formatNumber(safeEntitlement - safeRemaining);
+          const entitlementText = hasUnlimitedQuota
+            ? "∞"
+            : formatNumber(safeEntitlement);
+          const remainingText = hasUnlimitedQuota
+            ? "∞"
+            : formatNumber(safeRemaining);
 
           let progressBarColor = "var(--color-green)";
           if (percentUsed > 75) progressBarColor = "var(--color-yellow)";
           if (percentUsed > 90) progressBarColor = "var(--color-red)";
-          if (unlimited) progressBarColor = "var(--color-blue)";
+          if (hasUnlimitedQuota) progressBarColor = "var(--color-blue)";
 
           return `
             <div class="metric-card">
@@ -1028,19 +1108,19 @@
                   <span>${escapeHtml(title.replace(/_/g, " "))}</span>
                 </div>
                 ${
-                  unlimited
+                  hasUnlimitedQuota
                     ? `<span class="rounded-md px-2 py-1 text-xs font-semibold" style="background-color: rgba(37, 99, 235, 0.1); color: var(--color-blue);">Unlimited</span>`
                     : `<span class="text-xs font-semibold" style="color: var(--color-gray);">${percentUsed.toFixed(1)}% used</span>`
                 }
               </div>
               <div class="mt-5">
                 <div class="w-full progress-bar-bg h-2">
-                  <div class="progress-bar-fg h-2" style="width: ${unlimited ? 100 : percentUsed}%; background-color: ${progressBarColor};"></div>
+                  <div class="progress-bar-fg h-2" style="width: ${hasUnlimitedQuota ? 100 : percentUsed}%; background-color: ${progressBarColor};"></div>
                 </div>
               </div>
               <div class="mt-2 flex items-center justify-between gap-4 text-xs font-medium" style="color: var(--color-gray);">
-                <span>${used} / ${unlimited ? "∞" : entitlement.toLocaleString()}</span>
-                <span>${unlimited ? "∞" : remaining.toLocaleString()} remaining</span>
+                <span>${escapeHtml(used)} / ${escapeHtml(entitlementText)}</span>
+                <span>${escapeHtml(remainingText)} remaining</span>
               </div>
             </div>
           `;
@@ -2233,7 +2313,20 @@
           const urlParams = new URLSearchParams(window.location.search);
           const periodFromUrl = normalizePeriod(urlParams.get("period"));
           const endpointFromUrl = urlParams.get("endpoint");
-          const initialEndpoint = endpointFromUrl || DEFAULT_ENDPOINT;
+          let initialEndpoint = DEFAULT_ENDPOINT;
+          let shouldFetch = false;
+
+          if (endpointFromUrl) {
+            try {
+              initialEndpoint = resolveUsageUrl(endpointFromUrl);
+              shouldFetch = true;
+            } catch (error) {
+              console.warn(
+                "Ignored unsafe Usage Viewer endpoint:",
+                getErrorMessage(error)
+              );
+            }
+          }
 
           state.tokenUsagePeriod = periodFromUrl;
           tokenUsagePeriodSelect.value = periodFromUrl;
@@ -2241,7 +2334,7 @@
           migrateLegacyApiKey(initialEndpoint);
           syncEndpointCredential();
 
-          if (endpointFromUrl) {
+          if (shouldFetch) {
             void fetchData();
           } else {
             render();

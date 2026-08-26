@@ -1,4 +1,5 @@
 import consola from "consola"
+import { isIP } from "node:net"
 
 import {
   SUPPORTED_PROVIDER_TYPES,
@@ -24,9 +25,72 @@ export interface ResolvedProviderConfig {
 
 const OPENCODE_ANTHROPIC_MODEL_PATTERN = /^(?:qwen|minimax)/iu
 const OPENCODE_RESPONSES_MODEL_PATTERN = /^(?:gpt|grok)(?:[-_.]|$)/iu
+const warnedInsecureProviders = new Set<string>()
+
+export interface ProviderBaseUrlSecurity {
+  baseUrl: string
+  insecureRemoteHttp: boolean
+}
 
 export function normalizeProviderBaseUrl(url: string): string {
   return url.trim().replace(/\/+$/u, "")
+}
+
+function isLoopbackProviderHostname(hostname: string): boolean {
+  const normalizedHostname = hostname
+    .trim()
+    .toLowerCase()
+    .replace(/^\[(.*)\]$/u, "$1")
+    .replace(/\.$/u, "")
+  if (normalizedHostname === "localhost" || normalizedHostname === "::1") {
+    return true
+  }
+
+  return (
+    isIP(normalizedHostname) === 4
+    && normalizedHostname.split(".", 1)[0] === "127"
+  )
+}
+
+export function inspectProviderBaseUrl(
+  value: string,
+): ProviderBaseUrlSecurity | null {
+  const baseUrl = normalizeProviderBaseUrl(value)
+  if (!baseUrl) {
+    return null
+  }
+
+  try {
+    const url = new URL(baseUrl)
+    if (
+      (url.protocol !== "https:" && url.protocol !== "http:")
+      || url.username
+      || url.password
+      || url.search
+      || url.hash
+    ) {
+      return null
+    }
+
+    return {
+      baseUrl,
+      insecureRemoteHttp:
+        url.protocol === "http:" && !isLoopbackProviderHostname(url.hostname),
+    }
+  } catch {
+    return null
+  }
+}
+
+export function getInsecureProviderWarning(
+  providerName: string,
+  inspectedBaseUrl: ProviderBaseUrlSecurity | null,
+): string | null {
+  if (!inspectedBaseUrl?.insecureRemoteHttp) {
+    return null
+  }
+
+  return `SECURITY WARNING: Provider ${providerName} uses plaintext HTTP. Its API key, prompts, and responses can be intercepted. Configure an HTTPS baseUrl whenever possible.`
 }
 
 export function isSupportedProviderType(value: string): value is ProviderType {
@@ -150,7 +214,14 @@ export function getProviderConfig(name: string): ResolvedProviderConfig | null {
     return null
   }
 
-  const baseUrl = normalizeProviderBaseUrl(provider.baseUrl ?? "")
+  const inspectedBaseUrl = inspectProviderBaseUrl(provider.baseUrl ?? "")
+  if (provider.baseUrl && !inspectedBaseUrl) {
+    consola.warn(
+      `Provider ${providerName} is ignored because baseUrl must be an absolute HTTP(S) URL without credentials, query parameters, or fragments`,
+    )
+    return null
+  }
+  const baseUrl = inspectedBaseUrl?.baseUrl ?? ""
   const authType = resolveProviderAuthType(
     providerName,
     provider.authType,
@@ -169,6 +240,15 @@ export function getProviderConfig(name: string): ResolvedProviderConfig | null {
       `Provider ${providerName} is enabled but missing ${missingFields.join(" or ")}`,
     )
     return null
+  }
+
+  const insecureProviderWarning = getInsecureProviderWarning(
+    providerName,
+    inspectedBaseUrl,
+  )
+  if (insecureProviderWarning && !warnedInsecureProviders.has(providerName)) {
+    warnedInsecureProviders.add(providerName)
+    consola.warn(insecureProviderWarning)
   }
 
   return {

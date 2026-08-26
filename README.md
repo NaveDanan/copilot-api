@@ -428,20 +428,36 @@ Build the image:
 docker build -t copilot-api .
 ```
 
-Run the container with a bind mount so auth data survives restarts:
+Run the container with a bind mount so auth data survives restarts. Container
+networking requires an explicit non-loopback bind, so configure a strong API key
+first and publish the port only on the host loopback interface:
 
 ```sh
 mkdir -p ./copilot-data
-docker run -p 4141:4141 -v $(pwd)/copilot-data:/root/.local/share/copilot-api copilot-api
+cat > ./copilot-data/config.json <<'JSON'
+{
+  "auth": {
+    "apiKeys": ["replace-with-a-long-random-key"]
+  }
+}
+JSON
+chmod 600 ./copilot-data/config.json
+docker run -p 127.0.0.1:4141:4141 \
+  -v $(pwd)/copilot-data:/root/.local/share/copilot-api \
+  copilot-api --host 0.0.0.0 --allow-insecure-http
 ```
 
 This stores GitHub auth data, provider config, and other gateway state in `./copilot-data` on the host, mapped to `/root/.local/share/copilot-api` in the container.
+The explicit insecure flag is appropriate here only because Docker publishes the
+port on host loopback. Use `--tls-cert` and `--tls-key` instead when publishing
+the service to a network.
 
-Or pass a GitHub token directly:
-
-```sh
-docker run -p 4141:4141 -e GH_TOKEN=your_github_token_here copilot-api
-```
+Authenticate into the mounted data directory instead of putting a GitHub token
+in the image or command line. `GH_TOKEN` is supported for automated deployments,
+and the container entrypoint moves it into the protected token file before the
+server starts. The original environment value may still be visible through
+container metadata, so prefer the mounted token file or the deployment
+platform's file-based secret mechanism.
 
 ## Electron Desktop App
 
@@ -581,8 +597,8 @@ The dashboard provides a user-friendly interface to view your Copilot usage data
 
 > Token usage history requires Bun or Node.js >= 22.13.0. On Node.js < 22.13.0, the server runs normally but token usage storage is disabled.
 
-- **API Endpoint URL**: The dashboard is pre-configured to fetch data from your local server endpoint via a URL query parameter. You can manually switch this to any other compatible API endpoint.
-- **API Key Authentication**: If API Key authentication is enabled, enter a raw API key (sent as the `x-api-key` header) or `Authorization: Bearer <key>`. Credentials are remembered in the browser's local storage per endpoint origin, and switching to a different endpoint origin does not automatically send the previous credential.
+- **API Endpoint URL**: The dashboard fetches data from the gateway origin that served the page. It rejects cross-origin endpoints and URLs that contain credentials.
+- **API Key Authentication**: If API key authentication is enabled, enter a raw key (sent as `x-api-key`) or `Authorization: Bearer <key>`. The viewer keeps the credential in session storage for the current browser tab and removes older local-storage copies.
 - **Period Selector**: Choose from Day, Week, or Month time ranges. The URL query parameter updates automatically when you switch, making it easy to bookmark and share.
 - **Fetch Data**: Click the "Refresh" button to load or refresh the usage data. The dashboard also fetches data automatically on page load.
 - **Copilot Quotas**: View quota usage for services such as Chat and Completions via progress bars. Hover over a card to see used/remaining details.
@@ -591,8 +607,8 @@ The dashboard provides a user-friendly interface to view your Copilot usage data
 - **Model Breakdown Table**: A per-model summary of requests, input/output/cache tokens, and estimated cost for the selected period.
 - **Request Events (Paginated)**: A time-sorted list of request event records with pagination support, showing timestamps, models, request IDs, and token counts.
 - **Detailed Information**: See the full JSON response from the API for a detailed breakdown of all available usage statistics.
-- **URL-based Configuration**: You can also specify the API endpoint and period directly via `endpoint` and `period` query parameters. For example:
-  `http://localhost:4141/usage-viewer?endpoint=http://your-api-server/usage&period=week`
+- **URL-based Configuration**: You can specify a same-origin endpoint and period with the `endpoint` and `period` query parameters. Credentials are never added to the URL. For example:
+  `http://localhost:4141/usage-viewer?endpoint=/usage&period=week`
 
 ### Usage Viewer Screenshot
 
@@ -624,22 +640,26 @@ The following options can be used with any subcommand. When passing them before 
 
 The following command line options are available for the `start` command:
 
-| Option         | Description                                                                   | Default    | Alias |
-| -------------- | ----------------------------------------------------------------------------- | ---------- | ----- |
-| --port         | Port to listen on                                                             | 4141       | -p    |
-| --verbose      | Enable verbose logging                                                        | false      | -v    |
-| --github-token | Provide GitHub token directly (must be generated using the `auth` subcommand) | none       | -g    |
-| --claude-code  | Generate a command to launch Claude Code with Copilot API config              | false      | -c    |
-| --show-token   | Show GitHub and Copilot tokens on fetch and refresh                           | false      | none  |
-| --proxy-env    | Initialize proxy from environment variables                                   | false      | none  |
+| Option                | Description                                                                                         | Default   | Alias |
+| --------------------- | --------------------------------------------------------------------------------------------------- | --------- | ----- |
+| --host                | Host to listen on; non-loopback hosts require `auth.apiKeys` and TLS or explicit insecure opt-in    | 127.0.0.1 | none  |
+| --port                | Port to listen on                                                                                   | 4141      | -p    |
+| --verbose             | Log complete prompts, responses, and tool payloads locally for up to 7 days                         | false     | -v    |
+| --github-token        | Provide a GitHub token through process arguments and shell history                                  | none      | -g    |
+| --claude-code         | Generate a command to launch Claude Code with Copilot API config                                    | false     | -c    |
+| --show-token          | Print reusable GitHub, Copilot, and Codex tokens                                                     | false     | none  |
+| --proxy-env           | Route requests through environment proxies, which may inspect provider credentials and chat traffic | false     | none  |
+| --allow-insecure-http | Allow interceptable HTTP on a non-loopback host                                                      | false     | none  |
+| --tls-cert            | Path to a TLS certificate PEM file; requires `--tls-key`                                           | none      | none  |
+| --tls-key             | Path to a TLS private-key PEM file; requires `--tls-cert`                                          | none      | none  |
 
 ### Auth Command Options
 
 | Option       | Description               | Default | Alias |
 | ------------ | ------------------------- | ------- | ----- |
 | --provider   | Provider to log in with or configure (`copilot`, `codex`, `opencode-go`, `kimi`, `deepseek`, `dashscope`, `openrouter`, or `custom`) | prompt | none |
-| --verbose    | Enable verbose logging    | false   | -v    |
-| --show-token | Show GitHub token on auth | false   | none  |
+| --verbose    | Print detailed OAuth and provider authentication diagnostics | false   | -v    |
+| --show-token | Print a reusable GitHub token                                | false   | none  |
 
 Use `copilot-api auth login --provider copilot` only when you want to enable the GitHub Copilot provider. Copilot is not required for `codex` or third-party provider-only usage.
 
@@ -739,7 +759,7 @@ Gateway API keys live under `auth.apiKeys` in `config.json`. Manage them with `c
 - **messageApiWebSearchModel:** Global fallback model used when a top-level Copilot `/v1/messages` request contains only the server-side `web_search` tool. Defaults to `gpt-5-mini`. If the value is a `provider/model` alias, the request is routed into that provider's Messages API path with the provider prefix stripped. For Copilot GPT models, web search runs through `/responses`. Mixed `web_search` plus custom tools are not supported and the server-side `web_search` tool is stripped.
 - **claudeAutoModel:** Model used for Claude Code background security-monitor requests on `/v1/messages` and provider message routes. A request is treated as a security-monitor request when it carries no tools, sets `stop_sequences` to `["</block>"]`, and contains a system text block starting with `You are a security monitor for autonomous AI coding agents.`; its model is then replaced with this value. For top-level requests, a `provider/model` alias is forwarded into that provider's Messages API; provider routes keep their current provider and use this configured value directly. Defaults to empty (disabled).
 - **claudeTokenMultiplier:** Multiplier applied to the fallback GPT-tokenizer estimate for Claude `/v1/messages/count_tokens` requests. Defaults to `1.15`. Increase it if your client is still compacting too late. This setting is only used when the proxy is estimating Claude tokens locally; if `anthropicApiKey` is configured and Anthropic token counting succeeds, the exact Anthropic count is returned instead.
-- **anthropicApiKey:** Anthropic API key used to forward Claude `/v1/messages/count_tokens` requests to Anthropic's real token counting endpoint, which returns exact counts instead of GPT tokenizer estimates. Can also be set via the `ANTHROPIC_API_KEY` environment variable. If not set, or if the upstream call fails, token counting falls back to local GPT tokenizer estimation controlled by `claudeTokenMultiplier`.
+- **anthropicApiKey:** Anthropic API key used to forward Claude `/v1/messages/count_tokens` requests to Anthropic's real token counting endpoint, which returns exact counts instead of GPT tokenizer estimates. This must be set explicitly in `config.json` because enabling it sends the full token-counting request, including prompts and tool definitions, directly to Anthropic. The `ANTHROPIC_API_KEY` environment variable is intentionally ignored. If not set, or if the upstream call fails, token counting falls back to local GPT tokenizer estimation controlled by `claudeTokenMultiplier`.
 
 Edit this file to customize prompts or swap in your own fast model. Restart the server (or rerun the command) after changes so the cached config is refreshed.
 
@@ -747,11 +767,13 @@ Edit this file to customize prompts or swap in your own fast model. Restart the 
 
 - **Protected non-admin routes:** All routes except `/`, `/usage-viewer`, and `/usage-viewer/` require authentication when `auth.apiKeys` is configured and non-empty.
 - **Admin routes:** All `/admin/*` routes require `auth.adminApiKey`. If it is missing, the server generates one at startup and persists it to `config.json` before serving requests.
+- **Local-only default:** The server binds to `127.0.0.1`. Binding to any non-loopback host requires an explicit `--host` value, at least one configured `auth.apiKeys` entry, and either `--tls-cert` with `--tls-key` or the warned `--allow-insecure-http` opt-in.
+- **Browser isolation:** Cross-origin browser access is disabled. When regular API keys are not configured, requests with a non-loopback `Host` header are rejected to prevent DNS-rebinding access to the local gateway. HTTPS reverse proxies should set `X-Forwarded-Proto`.
+- **Usage Viewer isolation:** The viewer loads no third-party scripts or fonts, accepts only same-origin API endpoints, keeps its API key only in tab-scoped session storage, never forwards it across origins or redirects, and is served with a restrictive Content Security Policy.
 - **Allowed auth headers:**
   - `x-api-key: <your_key>`
   - `Authorization: Bearer <your_key>`
-- **CORS preflight:** `OPTIONS` requests are always allowed.
-- **When no regular keys are configured:** Non-admin routes continue to allow requests. This does not apply to `/admin/*`, which only accepts `auth.adminApiKey`.
+- **When no regular keys are configured:** Non-admin routes continue to allow requests only through a loopback host. This does not apply to `/admin/*`, which only accepts `auth.adminApiKey`.
 
 Example request for a regular protected route:
 
@@ -817,6 +839,7 @@ These endpoints are reserved for local administrative actions and only accept `a
 
 | Endpoint                              | Method | Description                                                                 |
 | ------------------------------------- | ------ | --------------------------------------------------------------------------- |
+| `GET /admin/token`                    | `GET`  | Returns the current Copilot token. Treat this credential as sensitive.      |
 | `GET /admin/config/model-mappings`    | `GET`  | Returns the current `config.json` path and the active `modelMappings` map.  |
 | `POST /admin/config/model-mappings`   | `POST` | Updates only the `modelMappings` field in `config.json` and returns it back. |
 

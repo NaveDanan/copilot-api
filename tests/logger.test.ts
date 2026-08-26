@@ -8,6 +8,7 @@ import {
   debugJson,
   debugJsonAsync,
   debugJsonTail,
+  logStreamParseError,
   shutdownLoggerRuntime,
 } from "~/lib/logger"
 import { state } from "~/lib/state"
@@ -42,13 +43,16 @@ async function waitFor(condition: () => boolean): Promise<void> {
 function trackLogStreams(): {
   restore: () => void
   streams: Array<fs.WriteStream>
+  options: Array<Parameters<typeof fs.createWriteStream>[1]>
 } {
   const originalCreateWriteStream = fs.createWriteStream
   const streams: Array<fs.WriteStream> = []
+  const options: Array<Parameters<typeof fs.createWriteStream>[1]> = []
   fs.createWriteStream = new Proxy(originalCreateWriteStream, {
     apply(target, thisArg, args) {
       const stream = Reflect.apply(target, thisArg, args) as fs.WriteStream
       streams.push(stream)
+      options.push(args[1] as Parameters<typeof fs.createWriteStream>[1])
       return stream
     },
   })
@@ -58,6 +62,7 @@ function trackLogStreams(): {
       fs.createWriteStream = originalCreateWriteStream
     },
     streams,
+    options,
   }
 }
 
@@ -131,6 +136,28 @@ test("debugJsonTail preserves tail truncation behavior", () => {
   expect(logger.debug).toHaveBeenCalledWith("payload", expected)
 })
 
+test("logStreamParseError hides raw data unless verbose logging is enabled", () => {
+  const logger = {
+    debug: mock(() => {}),
+    error: mock(() => {}),
+  }
+  const rawData = '{"secret":"chat response"'
+
+  state.verbose = false
+  logStreamParseError(logger as never, "parse.error", rawData, new Error("bad"))
+
+  expect(logger.error).toHaveBeenCalledWith(
+    "parse.error",
+    expect.objectContaining({ rawDataLength: rawData.length }),
+  )
+  expect(JSON.stringify(logger.error.mock.calls)).not.toContain(rawData)
+  expect(logger.debug).not.toHaveBeenCalled()
+
+  state.verbose = true
+  logStreamParseError(logger as never, "parse.error", rawData, new Error("bad"))
+  expect(logger.debug).toHaveBeenCalledWith("parse.error.raw_data", rawData)
+})
+
 test("createHandlerLogger writes to COPILOT_API_LOG_DIR when set", async () => {
   const logDir = fs.mkdtempSync(path.join(os.tmpdir(), "copilot-api-logs-"))
   process.env[LOG_DIR_ENV] = logDir
@@ -194,6 +221,7 @@ test("createHandlerLogger closes the previous stream when the date changes", asy
         && fs.existsSync(firstFilePath)
         && fs.readFileSync(firstFilePath, "utf8").includes("first-day-99"),
     )
+    expect(trackedStreams.options[0]).toMatchObject({ mode: 0o600 })
     const firstStream = trackedStreams.streams[0]
     expect(firstStream.closed).toBe(false)
 

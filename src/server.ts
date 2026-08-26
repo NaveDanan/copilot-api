@@ -1,17 +1,25 @@
 import { Hono } from "hono"
-import { cors } from "hono/cors"
 import { logger } from "hono/logger"
-import { readFileSync } from "node:fs"
 
+import {
+  browserIsolationMiddleware,
+  createHostValidationMiddleware,
+} from "./lib/network-security"
 import {
   createAuthMiddleware,
   getConfiguredAdminApiKeys,
 } from "./lib/request-auth"
 import { traceIdMiddleware } from "./lib/trace"
+import {
+  usageViewerContentSecurityPolicy,
+  usageViewerCss,
+  usageViewerHtml,
+} from "./usage-viewer"
 import { zstdDecompressionMiddleware } from "./lib/zstd-request"
 import { alphaSearchRoutes } from "./routes/alpha-search/route"
 import { completionRoutes } from "./routes/chat-completions/route"
 import { configRoutes } from "./routes/admin/config/route"
+import { tokenRoute } from "./routes/admin/token/route"
 import { embeddingRoutes } from "./routes/embeddings/route"
 import { imageRoutes } from "./routes/images/route"
 import { messageRoutes } from "./routes/messages/route"
@@ -28,12 +36,18 @@ import { usageRoute } from "./routes/usage/route"
 export const server = new Hono()
 
 server.use(traceIdMiddleware)
+server.use(createHostValidationMiddleware())
+server.use(browserIsolationMiddleware)
 server.use(logger())
-server.use(cors())
 server.use(
   "*",
   createAuthMiddleware({
-    allowUnauthenticatedPaths: ["/", "/usage-viewer", "/usage-viewer/"],
+    allowUnauthenticatedPaths: [
+      "/",
+      "/usage-viewer",
+      "/usage-viewer/",
+      "/usage-viewer/usage-viewer.css",
+    ],
     shouldSkipPath: (path) => path.startsWith("/admin/"),
   }),
 )
@@ -49,10 +63,20 @@ server.use(zstdDecompressionMiddleware)
 
 server.get("/", (c) => c.text("Server running"))
 server.get("/usage-viewer", (c) => {
-  const usageViewerFileUrl = new URL("../pages/index.html", import.meta.url)
-  return c.html(readFileSync(usageViewerFileUrl, "utf8"))
+  c.header("Content-Security-Policy", usageViewerContentSecurityPolicy)
+  c.header("Referrer-Policy", "no-referrer")
+  c.header("X-Content-Type-Options", "nosniff")
+  c.header("X-Frame-Options", "DENY")
+  c.header("Cache-Control", "no-store")
+  return c.html(usageViewerHtml)
 })
 server.get("/usage-viewer/", (c) => c.redirect("/usage-viewer", 301))
+server.get("/usage-viewer/usage-viewer.css", (c) => {
+  c.header("Content-Type", "text/css; charset=UTF-8")
+  c.header("Cache-Control", "no-cache")
+  c.header("X-Content-Type-Options", "nosniff")
+  return c.body(usageViewerCss)
+})
 
 server.route("/chat/completions", completionRoutes)
 server.route("/admin/config", configRoutes)
@@ -74,6 +98,9 @@ server.route("/v1/images", imageRoutes)
 
 // Anthropic compatible endpoints
 server.route("/v1/messages", messageRoutes)
+
+// Sensitive credentials are only available through admin authentication.
+server.route("/admin/token", tokenRoute)
 
 // Provider scoped endpoints
 server.route("/:provider/v1/messages", providerMessageRoutes)

@@ -7,6 +7,7 @@ import {
   nativeTheme,
 } from 'electron'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import { bindElectronFetch } from '../../src/lib/electron-fetch'
 import type {
@@ -34,6 +35,7 @@ import {
   readSettingsSync,
   setLaunchAtLoginFallback,
 } from './settings-store'
+import { isTrustedRendererUrl } from './renderer-security'
 
 const CLI_ENV_FLAGS = {
   '--api-home': 'COPILOT_API_HOME',
@@ -250,6 +252,9 @@ function destroyTray(): void {
 }
 
 function createWindow(startHidden = false): BrowserWindow {
+  const rendererPath = path.join(__dirname, '../renderer/index.html')
+  const trustedRendererUrl =
+    process.env.ELECTRON_RENDERER_URL ?? pathToFileURL(rendererPath).toString()
   const win = new BrowserWindow({
     width: 1000,
     height: 650,
@@ -259,6 +264,7 @@ function createWindow(startHidden = false): BrowserWindow {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
     ...resolveTitleBarOptions(),
     icon: process.platform === 'darwin' ? undefined : getWindowIconPath(),
@@ -267,6 +273,15 @@ function createWindow(startHidden = false): BrowserWindow {
   })
 
   win.removeMenu()
+
+  const blockUntrustedNavigation = (event: Electron.Event, url: string) => {
+    if (!isTrustedRendererUrl(url, trustedRendererUrl)) {
+      event.preventDefault()
+    }
+  }
+  win.webContents.on('will-navigate', blockUntrustedNavigation)
+  win.webContents.on('will-redirect', blockUntrustedNavigation)
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
   mainWindow = win
   if (startHidden) win.once('show', () => win.maximize())
@@ -319,9 +334,9 @@ function createWindow(startHidden = false): BrowserWindow {
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
-    void win.loadURL(process.env.ELECTRON_RENDERER_URL)
+    void win.loadURL(trustedRendererUrl)
   } else {
-    void win.loadFile(path.join(__dirname, '../renderer/index.html'))
+    void win.loadFile(rendererPath)
   }
 
   return win
@@ -347,6 +362,11 @@ async function initializeApplication(): Promise<void> {
   const win = createWindow(startHidden)
 
   registerIpcHandlers(win, {
+    trustedRendererUrl:
+      process.env.ELECTRON_RENDERER_URL
+      ?? pathToFileURL(
+        path.join(__dirname, '../renderer/index.html'),
+      ).toString(),
     getEffectiveProxySettings,
     onQuit: quitApplication,
     onBeforeSettingsSave: async (settings, prevSettings) => {
