@@ -113,6 +113,11 @@ export const applyCopilotTokenResponse = (
   // org entitlement advertise the business host, while the issued token is
   // bound to the enterprise host, causing 421 Misdirected Request).
   if (response.endpoints?.api) {
+    if (!state.strictSecurity) {
+      state.copilotApiUrl = response.endpoints.api
+      return
+    }
+
     const trustedApiUrl = resolveTrustedCopilotApiUrl(response.endpoints.api)
     if (trustedApiUrl) {
       state.copilotApiUrl = trustedApiUrl
@@ -367,6 +372,12 @@ export async function logUser() {
 
   state.userName = copilotUser.login
   consola.info(`Logged in as ${copilotUser.login}`)
+
+  if (!state.strictSecurity) {
+    state.copilotApiUrl = copilotUser.endpoints.api
+    state.tokenBasedBilling = copilotUser.token_based_billing
+    return
+  }
 
   const trustedApiUrl = resolveTrustedCopilotApiUrl(copilotUser.endpoints.api)
   if (trustedApiUrl) {

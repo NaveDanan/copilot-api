@@ -7,8 +7,18 @@ const usageViewerCssFileUrl = new URL(
   import.meta.url,
 )
 
-export const usageViewerHtml = readFileSync(usageViewerFileUrl, "utf8")
+const usageViewerSourceHtml = readFileSync(usageViewerFileUrl, "utf8")
 export const usageViewerCss = readFileSync(usageViewerCssFileUrl, "utf8")
+
+export function createUsageViewerHtml(strictSecurity: boolean): string {
+  return usageViewerSourceHtml.replaceAll(
+    "__COPILOT_API_STRICT_SECURITY__",
+    String(strictSecurity),
+  )
+}
+
+export const usageViewerHtml = createUsageViewerHtml(true)
+export const compatibilityUsageViewerHtml = createUsageViewerHtml(false)
 
 export function createUsageViewerContentSecurityPolicy(html: string): string {
   const inlineScripts = [

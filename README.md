@@ -444,7 +444,7 @@ JSON
 chmod 600 ./copilot-data/config.json
 docker run -p 127.0.0.1:4141:4141 \
   -v $(pwd)/copilot-data:/root/.local/share/copilot-api \
-  copilot-api --host 0.0.0.0 --allow-insecure-http
+  copilot-api --strict-security --host 0.0.0.0 --allow-insecure-http
 ```
 
 This stores GitHub auth data, provider config, and other gateway state in `./copilot-data` on the host, mapped to `/root/.local/share/copilot-api` in the container.
@@ -455,7 +455,8 @@ the service to a network.
 Authenticate into the mounted data directory instead of putting a GitHub token
 in the image or command line. `GH_TOKEN` is supported for automated deployments,
 and the container entrypoint moves it into the protected token file before the
-server starts. The original environment value may still be visible through
+server starts when `--strict-security` is enabled. Compatibility mode passes it
+as the legacy `--github-token` argument. The original environment value may still be visible through
 container metadata, so prefer the mounted token file or the deployment
 platform's file-based secret mechanism.
 
@@ -463,7 +464,7 @@ platform's file-based secret mechanism.
 
 If you prefer a GUI, this repository also includes an Electron desktop app in `desktop/`. It supports GitHub Copilot sign-in, OpenAI Codex OAuth, and API-key configuration for Kimi, DeepSeek, DashScope, OpenRouter, or a custom provider. After authorization or provider configuration, it can start and stop the local proxy with one click and shows the local endpoint, auth header, available models, usage, and logs in the app.
 
-The settings screen also exposes `OAuth App`, `API Home`, `Enterprise URL`, verbose logging, and minimize-to-tray. Windows x64 (`.exe`), macOS Apple Silicon (`.dmg`), and Linux x64 (`.AppImage`) packages are published in GitHub Releases:
+The settings screen also exposes `Increased security`, `OAuth App`, `API Home`, `Enterprise URL`, verbose logging, and minimize-to-tray. Increased security is off by default for compatibility, and the app suggests it once on first use. It applies on the next server start. Windows x64 (`.exe`), macOS Apple Silicon (`.dmg`), and Linux x64 (`.AppImage`) packages are published in GitHub Releases:
 
 https://github.com/caozhiyuan/copilot-api/releases
 
@@ -642,7 +643,7 @@ The following command line options are available for the `start` command:
 
 | Option                | Description                                                                                         | Default   | Alias |
 | --------------------- | --------------------------------------------------------------------------------------------------- | --------- | ----- |
-| --host                | Host to listen on; non-loopback hosts require `auth.apiKeys` and TLS or explicit insecure opt-in    | 127.0.0.1 | none  |
+| --host                | Host to listen on; defaults to loopback only with `--strict-security`                               | 0.0.0.0   | none  |
 | --port                | Port to listen on                                                                                   | 4141      | -p    |
 | --verbose             | Log complete prompts, responses, and tool payloads locally for up to 7 days                         | false     | -v    |
 | --github-token        | Provide a GitHub token through process arguments and shell history                                  | none      | -g    |
@@ -650,6 +651,7 @@ The following command line options are available for the `start` command:
 | --show-token          | Print reusable GitHub, Copilot, and Codex tokens                                                     | false     | none  |
 | --proxy-env           | Route requests through environment proxies, which may inspect provider credentials and chat traffic | false     | none  |
 | --allow-insecure-http | Allow interceptable HTTP on a non-loopback host                                                      | false     | none  |
+| --strict-security     | Enable strict network, browser, provider URL, credential, and compressed-request checks             | false     | none  |
 | --tls-cert            | Path to a TLS certificate PEM file; requires `--tls-key`                                           | none      | none  |
 | --tls-key             | Path to a TLS private-key PEM file; requires `--tls-cert`                                          | none      | none  |
 
@@ -759,7 +761,7 @@ Gateway API keys live under `auth.apiKeys` in `config.json`. Manage them with `c
 - **messageApiWebSearchModel:** Global fallback model used when a top-level Copilot `/v1/messages` request contains only the server-side `web_search` tool. Defaults to `gpt-5-mini`. If the value is a `provider/model` alias, the request is routed into that provider's Messages API path with the provider prefix stripped. For Copilot GPT models, web search runs through `/responses`. Mixed `web_search` plus custom tools are not supported and the server-side `web_search` tool is stripped.
 - **claudeAutoModel:** Model used for Claude Code background security-monitor requests on `/v1/messages` and provider message routes. A request is treated as a security-monitor request when it carries no tools, sets `stop_sequences` to `["</block>"]`, and contains a system text block starting with `You are a security monitor for autonomous AI coding agents.`; its model is then replaced with this value. For top-level requests, a `provider/model` alias is forwarded into that provider's Messages API; provider routes keep their current provider and use this configured value directly. Defaults to empty (disabled).
 - **claudeTokenMultiplier:** Multiplier applied to the fallback GPT-tokenizer estimate for Claude `/v1/messages/count_tokens` requests. Defaults to `1.15`. Increase it if your client is still compacting too late. This setting is only used when the proxy is estimating Claude tokens locally; if `anthropicApiKey` is configured and Anthropic token counting succeeds, the exact Anthropic count is returned instead.
-- **anthropicApiKey:** Anthropic API key used to forward Claude `/v1/messages/count_tokens` requests to Anthropic's real token counting endpoint, which returns exact counts instead of GPT tokenizer estimates. This must be set explicitly in `config.json` because enabling it sends the full token-counting request, including prompts and tool definitions, directly to Anthropic. The `ANTHROPIC_API_KEY` environment variable is intentionally ignored. If not set, or if the upstream call fails, token counting falls back to local GPT tokenizer estimation controlled by `claudeTokenMultiplier`.
+- **anthropicApiKey:** Anthropic API key used to forward Claude `/v1/messages/count_tokens` requests to Anthropic's real token counting endpoint, which returns exact counts instead of GPT tokenizer estimates. In compatibility mode, `ANTHROPIC_API_KEY` remains a fallback. Strict security requires this value in `config.json` because enabling it sends the full token-counting request, including prompts and tool definitions, directly to Anthropic. If no key is available, or if the upstream call fails, token counting falls back to local GPT tokenizer estimation controlled by `claudeTokenMultiplier`.
 
 Edit this file to customize prompts or swap in your own fast model. Restart the server (or rerun the command) after changes so the cached config is refreshed.
 
@@ -767,13 +769,13 @@ Edit this file to customize prompts or swap in your own fast model. Restart the 
 
 - **Protected non-admin routes:** All routes except `/`, `/usage-viewer`, and `/usage-viewer/` require authentication when `auth.apiKeys` is configured and non-empty.
 - **Admin routes:** All `/admin/*` routes require `auth.adminApiKey`. If it is missing, the server generates one at startup and persists it to `config.json` before serving requests.
-- **Local-only default:** The server binds to `127.0.0.1`. Binding to any non-loopback host requires an explicit `--host` value, at least one configured `auth.apiKeys` entry, and either `--tls-cert` with `--tls-key` or the warned `--allow-insecure-http` opt-in.
-- **Browser isolation:** Cross-origin browser access is disabled. When regular API keys are not configured, requests with a non-loopback `Host` header are rejected to prevent DNS-rebinding access to the local gateway. HTTPS reverse proxies should set `X-Forwarded-Proto`.
-- **Usage Viewer isolation:** The viewer loads no third-party scripts or fonts, accepts only same-origin API endpoints, keeps its API key only in tab-scoped session storage, never forwards it across origins or redirects, and is served with a restrictive Content Security Policy.
+- **Compatibility default:** Without `--strict-security`, the server keeps the previous `0.0.0.0` listener, wildcard CORS, remote Usage Viewer endpoints, environment-based Anthropic key fallback, and existing provider URL behavior.
+- **Strict network policy:** With `--strict-security`, the server defaults to `127.0.0.1`. A non-loopback host requires `auth.apiKeys` and either TLS or `--allow-insecure-http`.
+- **Strict browser isolation:** Strict mode disables cross-origin browser access and rejects non-loopback `Host` headers without regular API keys. The Usage Viewer becomes same-origin, session-only, redirect-blocking, and CSP-protected.
 - **Allowed auth headers:**
   - `x-api-key: <your_key>`
   - `Authorization: Bearer <your_key>`
-- **When no regular keys are configured:** Non-admin routes continue to allow requests only through a loopback host. This does not apply to `/admin/*`, which only accepts `auth.adminApiKey`.
+- **When no regular keys are configured:** In strict mode, non-admin routes allow unauthenticated requests only through a loopback host. Compatibility mode keeps the previous host behavior. This does not apply to `/admin/*`, which only accepts `auth.adminApiKey`.
 
 Example request for a regular protected route:
 

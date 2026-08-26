@@ -6,6 +6,7 @@ import type { TokenUsagePricingConfig } from "~/lib/token-usage/pricing"
 
 import { writeFileAtomically } from "./atomic-file"
 import { PATHS } from "./paths"
+import { state } from "./state"
 
 export interface AppConfig {
   auth?: {
@@ -490,7 +491,12 @@ const positiveIntegerOrDefault = (value: unknown, fallback: number): number => {
 }
 
 export function getAnthropicApiKey(): string | undefined {
-  return getConfig().anthropicApiKey?.trim() || undefined
+  const configuredApiKey = getConfig().anthropicApiKey?.trim()
+  if (configuredApiKey || state.strictSecurity) {
+    return configuredApiKey || undefined
+  }
+
+  return process.env.ANTHROPIC_API_KEY?.trim() || undefined
 }
 
 export function isResponsesApiWebSearchEnabled(): boolean {

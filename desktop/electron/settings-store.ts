@@ -3,7 +3,12 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import type { DesktopProxySettings, DesktopSettings } from '../src/types/ipc'
+import { writeFileAtomically } from '../../src/lib/atomic-file'
+import type {
+  DesktopProxySettings,
+  DesktopSettings,
+  DesktopSettingsUpdate,
+} from '../src/types/ipc'
 
 const SETTINGS_PATH = path.join(
   os.homedir(),
@@ -18,6 +23,8 @@ const DEFAULT_SETTINGS: DesktopSettings = {
   oauthApp: 'default',
   enterpriseUrl: '',
   lastPort: 4141,
+  increasedSecurity: false,
+  securitySuggestionShown: false,
   launchAtLogin: false,
   autoStartServer: false,
   minimizeToTray: false,
@@ -35,6 +42,7 @@ const DEFAULT_SETTINGS: DesktopSettings = {
 }
 
 let launchAtLoginFallback = DEFAULT_SETTINGS.launchAtLogin
+let settingsWriteQueue = Promise.resolve()
 
 export function setLaunchAtLoginFallback(enabled: boolean): void {
   launchAtLoginFallback = enabled
@@ -89,6 +97,14 @@ export function normalizeSettings(
       typeof settings?.lastPort === 'number' ?
         settings.lastPort
       : DEFAULT_SETTINGS.lastPort,
+    increasedSecurity:
+      typeof settings?.increasedSecurity === 'boolean' ?
+        settings.increasedSecurity
+      : DEFAULT_SETTINGS.increasedSecurity,
+    securitySuggestionShown:
+      typeof settings?.securitySuggestionShown === 'boolean' ?
+        settings.securitySuggestionShown
+      : DEFAULT_SETTINGS.securitySuggestionShown,
     launchAtLogin:
       typeof settings?.launchAtLogin === 'boolean' ?
         settings.launchAtLogin
@@ -155,10 +171,88 @@ export async function readSettings(): Promise<DesktopSettings> {
 }
 
 export async function writeSettings(settings: DesktopSettings): Promise<void> {
-  await fs.mkdir(path.dirname(SETTINGS_PATH), { recursive: true })
-  await fs.writeFile(
-    SETTINGS_PATH,
-    JSON.stringify(normalizeSettings(settings), null, 2),
-    'utf8',
+  const normalizedSettings = normalizeSettings(settings)
+  await enqueueSettingsWrite(() => {
+    writeSettingsFile(normalizedSettings)
+  })
+}
+
+export async function updateSettings(
+  update: (settings: DesktopSettings) => DesktopSettings,
+  hooks: {
+    afterPersist?: (
+      settings: DesktopSettings,
+      previousSettings: DesktopSettings,
+    ) => void | Promise<void>
+    beforePersist?: (
+      settings: DesktopSettings,
+      previousSettings: DesktopSettings,
+    ) => void | Promise<void>
+    rollback?: (
+      previousSettings: DesktopSettings,
+      settings: DesktopSettings,
+    ) => void | Promise<void>
+  } = {},
+): Promise<DesktopSettings> {
+  return enqueueSettingsWrite(async () => {
+    const settings = await readSettings()
+    const nextSettings = normalizeSettings(update(settings))
+    try {
+      await hooks.beforePersist?.(nextSettings, settings)
+      writeSettingsFile(nextSettings)
+    } catch (error) {
+      try {
+        await hooks.rollback?.(settings, nextSettings)
+      } catch (rollbackError) {
+        console.error('Failed to roll back desktop settings:', rollbackError)
+      }
+      throw error
+    }
+    await hooks.afterPersist?.(nextSettings, settings)
+    return nextSettings
+  })
+}
+
+export function mergeSettingsUpdate(
+  settings: DesktopSettings,
+  update: DesktopSettingsUpdate,
+): DesktopSettings {
+  return {
+    ...settings,
+    apiHome: update.apiHome ?? settings.apiHome,
+    oauthApp: update.oauthApp ?? settings.oauthApp,
+    enterpriseUrl: update.enterpriseUrl ?? settings.enterpriseUrl,
+    increasedSecurity: update.increasedSecurity ?? settings.increasedSecurity,
+    launchAtLogin: update.launchAtLogin ?? settings.launchAtLogin,
+    autoStartServer: update.autoStartServer ?? settings.autoStartServer,
+    minimizeToTray: update.minimizeToTray ?? settings.minimizeToTray,
+    verbose: update.verbose ?? settings.verbose,
+    showToken: update.showToken ?? settings.showToken,
+    language: update.language ?? settings.language,
+    theme: update.theme ?? settings.theme,
+    proxy: update.proxy ?? settings.proxy,
+  }
+}
+
+function writeSettingsFile(settings: DesktopSettings): void {
+  writeFileAtomically(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`)
+}
+
+function enqueueSettingsWrite<T>(task: () => T | Promise<T>): Promise<T> {
+  const result = settingsWriteQueue.then(task, task)
+  settingsWriteQueue = result.then(
+    () => undefined,
+    () => undefined,
   )
+  return result
+}
+
+export async function setIncreasedSecurityPreference(
+  enabled: boolean,
+): Promise<DesktopSettings> {
+  return updateSettings((settings) => ({
+    ...settings,
+    increasedSecurity: enabled,
+    securitySuggestionShown: true,
+  }))
 }

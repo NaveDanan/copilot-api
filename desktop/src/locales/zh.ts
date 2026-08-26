@@ -151,6 +151,16 @@ const zh: Locale = {
     minimizeToTray: '最小化到托盘',
     minimizeToTrayDesc: '关闭窗口时隐藏到系统托盘，不退出程序',
     sectionSecurity: '安全',
+    increasedSecurity: '增强安全模式',
+    increasedSecurityDesc:
+      '限制服务仅供本机和同源访问，并验证 Provider 地址。重启服务后生效。',
+    securitySuggestionTitle: '是否增强服务安全性？',
+    securitySuggestionBody:
+      '此模式会限制网络和浏览器访问、验证远程地址，并限制压缩请求大小。',
+    securitySuggestionNote:
+      '为兼容现有客户端和网络配置，此模式默认关闭。之后可在“设置”中修改。',
+    securitySuggestionEnable: '启用增强安全模式',
+    securitySuggestionNotNow: '暂不启用',
     serverKeysNote:
       'API Keys 和 Admin Key 保存在 config.json 中，修改后需重启正在运行的服务才能生效。',
     apiKeysLabel: 'API Keys',

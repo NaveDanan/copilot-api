@@ -294,6 +294,27 @@ export default function DashboardPage({
   const intentionalStop = useRef(false)
   const tokenUsageRequestId = useRef(0)
   const tokenUsageEventsRequestId = useRef(0)
+  const appliedInitialServerStatus = useRef<ServerStatus>()
+
+  useEffect(() => {
+    if (
+      !initialServerStatus
+      || appliedInitialServerStatus.current === initialServerStatus
+    ) {
+      return
+    }
+    appliedInitialServerStatus.current = initialServerStatus
+
+    setStarted(initialServerStatus.running)
+    if (initialServerStatus.port) {
+      setPort(String(initialServerStatus.port))
+    }
+    setStartError(
+      initialServerStatus.running ? '' : (
+        (initialServerStatus.error ?? t('dashboard.serverUnexpectedStop'))
+      ),
+    )
+  }, [initialServerStatus, t])
 
   const portNum = parseInt(port, 10)
   const openaiUrl = `http://localhost:${portNum}/v1`

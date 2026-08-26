@@ -1,3 +1,8 @@
-export function buildServerStartArgs(port: number): string[] {
-  return ['start', '--port', String(port)]
+export function buildServerStartArgs(
+  port: number,
+  increasedSecurity = false,
+): string[] {
+  const args = ['start', '--port', String(port)]
+  if (increasedSecurity) args.push('--strict-security')
+  return args
 }

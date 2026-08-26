@@ -459,6 +459,8 @@
           "/usage",
           window.location.origin
         ).toString();
+        const INCREASED_SECURITY =
+          "__COPILOT_API_STRICT_SECURITY__" === "true";
         const DEFAULT_TOKEN_USAGE_PERIOD = "day";
         const DEFAULT_TOKEN_USAGE_EVENTS_PAGE_SIZE = 20;
         const ALL_METRICS_VALUE = "__all__";
@@ -599,7 +601,10 @@
             return "";
           }
           try {
-            return window.sessionStorage.getItem(storageKey) || "";
+            const storage = INCREASED_SECURITY
+              ? window.sessionStorage
+              : window.localStorage;
+            return storage.getItem(storageKey) || "";
           } catch (error) {
             console.warn(
               "Could not read stored credential:",
@@ -615,8 +620,12 @@
             return;
           }
           try {
-            window.sessionStorage.setItem(storageKey, value);
-            window.localStorage.removeItem(storageKey);
+            if (INCREASED_SECURITY) {
+              window.sessionStorage.setItem(storageKey, value);
+              window.localStorage.removeItem(storageKey);
+            } else {
+              window.localStorage.setItem(storageKey, value);
+            }
           } catch (error) {
             console.warn(
               "Could not store credential:",
@@ -660,16 +669,15 @@
                 LEGACY_API_KEY_STORAGE_KEY
               );
               const storedValue = window.localStorage.getItem(storageKey);
-              if (
-                (storedValue || legacyValue)
-                && !window.sessionStorage.getItem(storageKey)
-              ) {
-                window.sessionStorage.setItem(
-                  storageKey,
-                  storedValue || legacyValue
-                );
+              const nextValue = storedValue || legacyValue;
+              if (INCREASED_SECURITY) {
+                if (nextValue && !window.sessionStorage.getItem(storageKey)) {
+                  window.sessionStorage.setItem(storageKey, nextValue);
+                }
+                window.localStorage.removeItem(storageKey);
+              } else if (nextValue && !storedValue) {
+                window.localStorage.setItem(storageKey, nextValue);
               }
-              window.localStorage.removeItem(storageKey);
             } catch (error) {
               console.warn(
                 "Could not migrate legacy credential:",
@@ -734,9 +742,12 @@
         function resolveSameOriginUrl(value) {
           const url = new URL(value, window.location.origin);
           if (
-            url.origin !== window.location.origin
-            || url.username
-            || url.password
+            INCREASED_SECURITY
+            && (
+              url.origin !== window.location.origin
+              || url.username
+              || url.password
+            )
           ) {
             throw new Error(
               "Usage Viewer only connects to this gateway's origin."
@@ -805,7 +816,7 @@
           const requestUrl = resolveSameOriginUrl(url).toString();
           const response = await fetch(requestUrl, {
             headers: buildRequestHeaders(requestUrl),
-            redirect: "error",
+            redirect: INCREASED_SECURITY ? "error" : "follow",
             referrerPolicy: "no-referrer",
           });
 

@@ -2,6 +2,7 @@ import { useState, useEffect, type ReactNode } from 'react'
 import type {
   DesktopProxyMode,
   DesktopSettings,
+  DesktopSettingsUpdate,
   ServerKeysConfig,
   ServerKeysConfigUpdate,
   ThemePreference,
@@ -38,6 +39,40 @@ function requiresAppRestart(
     || previous.oauthApp !== next.oauthApp
     || previous.enterpriseUrl !== next.enterpriseUrl
   )
+}
+
+function getSettingsUpdate(
+  previous: DesktopSettings,
+  next: DesktopSettings,
+): DesktopSettingsUpdate {
+  return {
+    ...(previous.apiHome === next.apiHome ? {} : { apiHome: next.apiHome }),
+    ...(previous.oauthApp === next.oauthApp ? {} : { oauthApp: next.oauthApp }),
+    ...(previous.enterpriseUrl === next.enterpriseUrl ?
+      {}
+    : { enterpriseUrl: next.enterpriseUrl }),
+    ...(previous.increasedSecurity === next.increasedSecurity ?
+      {}
+    : { increasedSecurity: next.increasedSecurity }),
+    ...(previous.launchAtLogin === next.launchAtLogin ?
+      {}
+    : { launchAtLogin: next.launchAtLogin }),
+    ...(previous.autoStartServer === next.autoStartServer ?
+      {}
+    : { autoStartServer: next.autoStartServer }),
+    ...(previous.minimizeToTray === next.minimizeToTray ?
+      {}
+    : { minimizeToTray: next.minimizeToTray }),
+    ...(previous.verbose === next.verbose ? {} : { verbose: next.verbose }),
+    ...(previous.showToken === next.showToken ?
+      {}
+    : { showToken: next.showToken }),
+    ...(previous.language === next.language ? {} : { language: next.language }),
+    ...(previous.theme === next.theme ? {} : { theme: next.theme }),
+    ...(JSON.stringify(previous.proxy) === JSON.stringify(next.proxy) ?
+      {}
+    : { proxy: next.proxy }),
+  }
 }
 
 const fieldClass =
@@ -238,6 +273,8 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
     oauthApp: 'default',
     enterpriseUrl: '',
     lastPort: 4141,
+    increasedSecurity: false,
+    securitySuggestionShown: false,
     launchAtLogin: false,
     autoStartServer: false,
     minimizeToTray: false,
@@ -314,7 +351,11 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
         setLoadedServerKeys(savedKeys)
       }
 
-      await window.electronAPI.saveSettings(settings)
+      if (initialSettings) {
+        await window.electronAPI.saveSettings(
+          getSettingsUpdate(initialSettings, settings),
+        )
+      }
       setLangPref(settings.language)
       setThemePref(settings.theme)
 
@@ -557,6 +598,17 @@ export default function SettingsModal({ onClose }: SettingsModalProps) {
 
             {section === 'security' && (
               <div>
+                <SettingRow
+                  label={t('settings.increasedSecurity')}
+                  description={t('settings.increasedSecurityDesc')}
+                >
+                  <Toggle
+                    checked={settings.increasedSecurity}
+                    onChange={(v) =>
+                      setSettings((s) => ({ ...s, increasedSecurity: v }))
+                    }
+                  />
+                </SettingRow>
                 <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[12px] leading-relaxed text-blue-800 dark:border-blue-400/15 dark:bg-blue-500/10 dark:text-blue-100/80">
                   {t('settings.serverKeysNote')}
                 </div>

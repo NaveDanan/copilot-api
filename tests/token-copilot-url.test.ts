@@ -52,6 +52,7 @@ const { copilotBaseUrl, resolveTrustedCopilotApiUrl } = await import(
 )
 
 beforeEach(() => {
+  state.strictSecurity = true
   state.githubToken = "github-token"
   state.copilotToken = undefined
   state.copilotApiUrl = undefined
@@ -166,6 +167,20 @@ test("rejects untrusted or plaintext Copilot API endpoints", () => {
   state.copilotApiUrl = "http://api.githubcopilot.com"
   expect(copilotBaseUrl(state)).toBe("https://api.githubcopilot.com")
   expect(resolveTrustedCopilotApiUrl("http://api.githubcopilot.com")).toBeNull()
+})
+
+test("keeps token routing endpoints in compatibility mode", () => {
+  state.strictSecurity = false
+
+  applyCopilotTokenResponse({
+    token: "t-compatible",
+    refresh_in: 60,
+    expires_at: 0,
+    endpoints: { api: "http://proxy.internal/copilot" },
+  })
+
+  expect(state.copilotApiUrl).toBe("http://proxy.internal/copilot")
+  expect(copilotBaseUrl(state)).toBe("http://proxy.internal/copilot")
 })
 
 test("opencode oauth app mode skips token exchange and keeps the GitHub token", async () => {

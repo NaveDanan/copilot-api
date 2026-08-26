@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  compatibilityUsageViewerHtml,
+  createUsageViewerHtml,
   createUsageViewerContentSecurityPolicy,
   usageViewerContentSecurityPolicy,
   usageViewerCss,
@@ -15,8 +17,11 @@ describe("usage viewer security", () => {
   })
 
   test("restricts requests and API keys to the gateway origin", () => {
+    expect(usageViewerHtml).toContain('"true" === "true"')
     expect(usageViewerHtml).toContain("url.origin !== window.location.origin")
-    expect(usageViewerHtml).toContain('redirect: "error"')
+    expect(usageViewerHtml).toContain(
+      'redirect: INCREASED_SECURITY ? "error" : "follow"',
+    )
     expect(usageViewerHtml).toContain("Ignored unsafe Usage Viewer endpoint:")
     expect(usageViewerHtml).not.toContain(
       "endpointUrlInput.value = endpointFromUrl",
@@ -24,8 +29,19 @@ describe("usage viewer security", () => {
     expect(usageViewerHtml).toContain(
       "window.sessionStorage.setItem(storageKey, value)",
     )
-    expect(usageViewerHtml).not.toContain(
+    expect(usageViewerHtml).toContain(
       "window.localStorage.setItem(storageKey, value)",
+    )
+  })
+
+  test("keeps remote endpoints and persistent credentials in compatibility mode", () => {
+    expect(createUsageViewerHtml(false)).toBe(compatibilityUsageViewerHtml)
+    expect(compatibilityUsageViewerHtml).toContain('"false" === "true"')
+    expect(compatibilityUsageViewerHtml).toContain(
+      "window.localStorage.setItem(storageKey, value)",
+    )
+    expect(compatibilityUsageViewerHtml).toContain(
+      'redirect: INCREASED_SECURITY ? "error" : "follow"',
     )
   })
 

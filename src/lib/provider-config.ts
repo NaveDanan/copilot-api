@@ -12,6 +12,7 @@ import {
   type ProviderConfig,
   type ProviderType,
 } from "./config-store"
+import { state } from "./state"
 
 export interface ResolvedProviderConfig {
   name: string
@@ -214,14 +215,18 @@ export function getProviderConfig(name: string): ResolvedProviderConfig | null {
     return null
   }
 
-  const inspectedBaseUrl = inspectProviderBaseUrl(provider.baseUrl ?? "")
-  if (provider.baseUrl && !inspectedBaseUrl) {
+  const configuredBaseUrl = provider.baseUrl ?? ""
+  const inspectedBaseUrl = inspectProviderBaseUrl(configuredBaseUrl)
+  if (state.strictSecurity && configuredBaseUrl && !inspectedBaseUrl) {
     consola.warn(
       `Provider ${providerName} is ignored because baseUrl must be an absolute HTTP(S) URL without credentials, query parameters, or fragments`,
     )
     return null
   }
-  const baseUrl = inspectedBaseUrl?.baseUrl ?? ""
+  const baseUrl =
+    state.strictSecurity ?
+      (inspectedBaseUrl?.baseUrl ?? "")
+    : normalizeProviderBaseUrl(configuredBaseUrl)
   const authType = resolveProviderAuthType(
     providerName,
     provider.authType,

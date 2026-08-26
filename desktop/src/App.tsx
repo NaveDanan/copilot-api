@@ -1,11 +1,23 @@
 import { useState, useEffect } from 'react'
 import AuthPage from './pages/AuthPage'
 import DashboardPage from './pages/DashboardPage'
+import SecuritySuggestionDialog from './components/SecuritySuggestionDialog'
 import { useLanguage } from './contexts/LanguageContext'
 import { autoStartServer } from './lib/auto-start-server'
-import type { AuthResult, DesktopAuthMode, ServerStatus } from './types/ipc'
+import type {
+  AuthResult,
+  AuthStatus,
+  DesktopAuthMode,
+  DesktopSettings,
+  ServerStatus,
+} from './types/ipc'
 
 export type Page = 'auth' | 'dashboard'
+
+interface PendingAutoStart {
+  authStatus: AuthStatus
+  settings: DesktopSettings
+}
 
 function BootScreen({ loadingText }: { loadingText: string }) {
   return (
@@ -32,6 +44,9 @@ export default function App() {
   const [canReturnFromAuth, setCanReturnFromAuth] = useState(false)
   const [port, setPort] = useState<number>(4141)
   const [initialServerStatus, setInitialServerStatus] = useState<ServerStatus>()
+  const [showSecuritySuggestion, setShowSecuritySuggestion] = useState(false)
+  const [pendingAutoStart, setPendingAutoStart] =
+    useState<PendingAutoStart | null>(null)
   const { setLangPref, t } = useLanguage()
 
   useEffect(() => {
@@ -48,8 +63,17 @@ export default function App() {
 
         setPort(settings.lastPort)
         setLangPref(settings.language ?? 'auto')
+        setShowSecuritySuggestion(!settings.securitySuggestionShown)
 
         if (authResult.success && authResult.mode !== 'none') {
+          if (!settings.securitySuggestionShown) {
+            setAuthMode(authResult.mode)
+            setCanReturnFromAuth(false)
+            setPendingAutoStart({ authStatus: authResult, settings })
+            setPage('dashboard')
+            return
+          }
+
           const serverStatus = await autoStartServer(
             settings,
             authResult,
@@ -99,25 +123,57 @@ export default function App() {
     setPage('dashboard')
   }
 
+  const handleSecurityDecision = async (enabled: boolean) => {
+    const savedSettings = await window.electronAPI.setIncreasedSecurity(enabled)
+    if (pendingAutoStart) {
+      const serverStatus = await autoStartServer(
+        savedSettings,
+        pendingAutoStart.authStatus,
+        window.electronAPI.startServer,
+      )
+      setInitialServerStatus(serverStatus)
+      setPendingAutoStart(null)
+    }
+    setShowSecuritySuggestion(false)
+  }
+
+  const securitySuggestion =
+    showSecuritySuggestion ?
+      <SecuritySuggestionDialog onDecision={handleSecurityDecision} />
+    : null
+
   if (page === null) {
     return <BootScreen loadingText={t('auth.loading')} />
   }
 
+  if (showSecuritySuggestion) {
+    return (
+      <>
+        <BootScreen loadingText={t('auth.loading')} />
+        {securitySuggestion}
+      </>
+    )
+  }
+
   if (page === 'auth') {
     return (
-      <AuthPage
-        onBack={canReturnFromAuth ? handleBackToDashboard : undefined}
-        onSuccess={handleAuthSuccess}
-      />
+      <>
+        <AuthPage
+          onBack={canReturnFromAuth ? handleBackToDashboard : undefined}
+          onSuccess={handleAuthSuccess}
+        />
+      </>
     )
   }
 
   return (
-    <DashboardPage
-      authMode={authMode}
-      defaultPort={port}
-      initialServerStatus={initialServerStatus}
-      onChangeAuth={handleChangeAuth}
-    />
+    <>
+      <DashboardPage
+        authMode={authMode}
+        defaultPort={port}
+        initialServerStatus={initialServerStatus}
+        onChangeAuth={handleChangeAuth}
+      />
+    </>
   )
 }

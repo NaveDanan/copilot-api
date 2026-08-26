@@ -157,6 +157,16 @@ const en: Locale = {
     minimizeToTray: 'Minimize to tray',
     minimizeToTrayDesc: "Hide to system tray when closing, don't quit",
     sectionSecurity: 'Security',
+    increasedSecurity: 'Increased security',
+    increasedSecurityDesc:
+      'Restrict the server to local, same-origin access and validate provider endpoints. Restart the server to apply changes.',
+    securitySuggestionTitle: 'Increase server security?',
+    securitySuggestionBody:
+      'This mode restricts network and browser access, validates remote endpoints, and limits compressed requests.',
+    securitySuggestionNote:
+      'It is off by default to keep existing clients and network setups working. You can change it later in Settings.',
+    securitySuggestionEnable: 'Enable increased security',
+    securitySuggestionNotNow: 'Not now',
     serverKeysNote:
       'API Keys and Admin Key are stored in config.json. Restart the running service to apply changes.',
     apiKeysLabel: 'API Keys',

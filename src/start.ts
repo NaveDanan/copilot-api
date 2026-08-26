@@ -37,7 +37,7 @@ import {
 } from "./services/vscode-env"
 
 interface RunServerOptions {
-  host: string
+  host?: string
   port: number
   verbose: boolean
   githubToken?: string
@@ -45,6 +45,7 @@ interface RunServerOptions {
   showToken: boolean
   proxyEnv: boolean
   allowInsecureHttp: boolean
+  strictSecurity: boolean
   tlsCert?: string
   tlsKey?: string
 }
@@ -54,6 +55,13 @@ export interface StartupSecurityOptions {
   proxyEnv: boolean
   showToken: boolean
   verbose: boolean
+}
+
+export function resolveServerHostname(
+  host: string | undefined,
+  strictSecurity: boolean,
+): string {
+  return host?.trim() || (strictSecurity ? DEFAULT_SERVER_HOST : "0.0.0.0")
 }
 
 export function getStartupSecurityWarnings(
@@ -231,19 +239,25 @@ export async function runServer(options: RunServerOptions): Promise<void> {
 
   consola.options.throttle = 0
 
+  state.strictSecurity = options.strictSecurity
+
   for (const warning of getStartupSecurityWarnings(options)) {
     consola.warn(warning)
   }
 
   mergeConfigWithDefaults()
-  const hostname = options.host.trim()
-  assertSafeServerBinding(hostname, getConfiguredApiKeys())
+  const hostname = resolveServerHostname(options.host, options.strictSecurity)
+  if (options.strictSecurity) {
+    assertSafeServerBinding(hostname, getConfiguredApiKeys())
+  }
   const serverTls = await resolveServerTls(options.tlsCert, options.tlsKey)
-  assertSafeServerTransport(
-    hostname,
-    Boolean(serverTls),
-    options.allowInsecureHttp,
-  )
+  if (options.strictSecurity) {
+    assertSafeServerTransport(
+      hostname,
+      Boolean(serverTls),
+      options.allowInsecureHttp,
+    )
+  }
   if (!serverTls && !isLoopbackHostname(hostname)) {
     consola.warn(
       "SECURITY WARNING: --allow-insecure-http exposes API keys, prompts, and responses to network interception. Use --tls-cert and --tls-key for remote access.",
@@ -310,8 +324,8 @@ export const start = defineCommand({
   args: {
     host: {
       type: "string",
-      default: DEFAULT_SERVER_HOST,
-      description: "Host to listen on; non-loopback hosts require auth.apiKeys",
+      description:
+        "Host to listen on (default: 0.0.0.0, or 127.0.0.1 with --strict-security)",
     },
     port: {
       alias: "p",
@@ -354,6 +368,12 @@ export const start = defineCommand({
       description:
         "Allow plaintext HTTP on non-loopback hosts (exposes credentials and chats to network interception)",
     },
+    "strict-security": {
+      type: "boolean",
+      default: false,
+      description:
+        "Enable strict network, browser, provider, and request security checks",
+    },
     "tls-cert": {
       type: "string",
       description: "Path to a TLS certificate PEM file",
@@ -373,6 +393,7 @@ export const start = defineCommand({
       showToken: args["show-token"],
       proxyEnv: args["proxy-env"],
       allowInsecureHttp: args["allow-insecure-http"],
+      strictSecurity: args["strict-security"],
       tlsCert: args["tls-cert"],
       tlsKey: args["tls-key"],
     })

@@ -63,19 +63,28 @@ afterEach(() => {
 })
 
 describe("privacy boundaries", () => {
-  test("uses Anthropic token counting only when explicitly configured", () => {
-    const unconfiguredResult = runScript(
+  test("gates the Anthropic environment key behind strict security", () => {
+    const compatibilityResult = runScript(
       createTempConfig({}),
       'const { getAnthropicApiKey } = await import("./src/lib/config"); console.log(`RESULT:${JSON.stringify(getAnthropicApiKey() ?? null)}`);',
       {
         ANTHROPIC_API_KEY: "environment-secret",
       },
     )
-    expect(unconfiguredResult).toBeNull()
+    expect(compatibilityResult).toBe("environment-secret")
+
+    const unconfiguredStrictResult = runScript(
+      createTempConfig({}),
+      'const { state } = await import("./src/lib/state"); state.strictSecurity = true; const { getAnthropicApiKey } = await import("./src/lib/config"); console.log(`RESULT:${JSON.stringify(getAnthropicApiKey() ?? null)}`);',
+      {
+        ANTHROPIC_API_KEY: "environment-secret",
+      },
+    )
+    expect(unconfiguredStrictResult).toBeNull()
 
     const configuredResult = runScript(
       createTempConfig({ anthropicApiKey: " configured-secret " }),
-      'const { getAnthropicApiKey } = await import("./src/lib/config"); console.log(`RESULT:${JSON.stringify(getAnthropicApiKey() ?? null)}`);',
+      'const { state } = await import("./src/lib/state"); state.strictSecurity = true; const { getAnthropicApiKey } = await import("./src/lib/config"); console.log(`RESULT:${JSON.stringify(getAnthropicApiKey() ?? null)}`);',
       {
         ANTHROPIC_API_KEY: "environment-secret",
       },
@@ -87,6 +96,8 @@ describe("privacy boundaries", () => {
     const result = runScript(
       createTempConfig({ auth: { apiKeys: [] } }),
       [
+        'const { state: runtimeState } = await import("./src/lib/state");',
+        "runtimeState.strictSecurity = true;",
         'const { mergeConfigWithDefaults } = await import("./src/lib/config");',
         "const config = mergeConfigWithDefaults();",
         'const { server } = await import("./src/server");',
@@ -130,6 +141,26 @@ describe("privacy boundaries", () => {
       viewerFrameOptions: "DENY",
       viewerCssStatus: 200,
       viewerCssType: "text/css; charset=UTF-8",
+    })
+  })
+
+  test("keeps legacy host and CORS behavior when strict security is off", () => {
+    const result = runScript(
+      createTempConfig({ auth: { apiKeys: [] } }),
+      [
+        'const { state } = await import("./src/lib/state");',
+        "state.strictSecurity = false;",
+        'const { server } = await import("./src/server");',
+        'const crossOrigin = await server.request("http://localhost/", { headers: { origin: "https://client.example" } });',
+        'const remoteHost = await server.request("http://gateway.example/");',
+        'console.log(`RESULT:${JSON.stringify({ crossOriginStatus: crossOrigin.status, cors: crossOrigin.headers.get("access-control-allow-origin"), remoteHostStatus: remoteHost.status })}`);',
+      ].join("\n"),
+    )
+
+    expect(result).toEqual({
+      crossOriginStatus: 200,
+      cors: "*",
+      remoteHostStatus: 200,
     })
   })
 })

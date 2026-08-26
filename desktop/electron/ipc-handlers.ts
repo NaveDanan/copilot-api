@@ -34,8 +34,12 @@ import {
   getLogs,
   isRunning,
 } from './server-manager'
-import { readSettings, writeSettings } from './settings-store'
-import { runSettingsTransaction } from './settings-transaction'
+import {
+  readSettings,
+  mergeSettingsUpdate,
+  setIncreasedSecurityPreference,
+  updateSettings,
+} from './settings-store'
 import { isSafeExternalUrl, isTrustedRendererUrl } from './renderer-security'
 import {
   readServerKeysConfig,
@@ -45,6 +49,7 @@ import type {
   DesktopAuthMode,
   DesktopProxySettings,
   DesktopSettings,
+  DesktopSettingsUpdate,
   ModelMappingsConfig,
   ProviderAuthInput,
   ServerAuthInfo,
@@ -233,8 +238,7 @@ export function registerIpcHandlers(
           getCopilotAccountType(token),
         ])
         // Detect and persist the account type automatically after sign-in
-        const settings = await readSettings()
-        await writeSettings({ ...settings, accountType })
+        await updateSettings((settings) => ({ ...settings, accountType }))
         if (!mainWindow.isDestroyed()) {
           mainWindow.webContents.send('auth:success', {
             success: true,
@@ -262,8 +266,7 @@ export function registerIpcHandlers(
       ])
       await saveToken(token)
       // Detect and persist the account type automatically
-      const settings = await readSettings()
-      await writeSettings({ ...settings, accountType })
+      await updateSettings((settings) => ({ ...settings, accountType }))
       return { success: true, mode: 'copilot' }
     } catch (err) {
       return { success: false, error: (err as Error).message }
@@ -326,13 +329,17 @@ export function registerIpcHandlers(
 
       const settings = await readSettings()
       const serverOptions = {
+        increasedSecurity: settings.increasedSecurity,
         verbose: settings.verbose,
         showToken: settings.showToken,
         proxy: options.getEffectiveProxySettings?.(settings) ?? settings.proxy,
       }
 
       // Persist the last used port
-      await writeSettings({ ...settings, lastPort: port })
+      await updateSettings((currentSettings) => ({
+        ...currentSettings,
+        lastPort: port,
+      }))
 
       return startServer(port, serverOptions)
     },
@@ -350,17 +357,30 @@ export function registerIpcHandlers(
 
   // Settings
   handle('settings:get', async () => readSettings())
-  handle('settings:save', async (_event, settings: DesktopSettings) => {
-    const prev = await readSettings()
-    await runSettingsTransaction(
-      () => options.onBeforeSettingsSave?.(settings, prev),
-      () => writeSettings(settings),
-      () => options.onBeforeSettingsSave?.(prev, settings),
-    )
-    if (options.onSettingsChange) {
-      await options.onSettingsChange(settings, prev)
-    }
-  })
+  handle(
+    'settings:set-increased-security',
+    async (_event, enabled: boolean) => {
+      if (typeof enabled !== 'boolean') {
+        throw new Error('Increased security must be a boolean')
+      }
+      return setIncreasedSecurityPreference(enabled)
+    },
+  )
+  handle(
+    'settings:save',
+    async (_event, settingsUpdate: DesktopSettingsUpdate) =>
+      updateSettings(
+        (settings) => mergeSettingsUpdate(settings, settingsUpdate),
+        {
+          beforePersist: (settings, previousSettings) =>
+            options.onBeforeSettingsSave?.(settings, previousSettings),
+          rollback: (previousSettings, settings) =>
+            options.onBeforeSettingsSave?.(previousSettings, settings),
+          afterPersist: (settings, previousSettings) =>
+            options.onSettingsChange?.(settings, previousSettings),
+        },
+      ),
+  )
   handle('config:get-model-mappings', async () => fetchModelMappingsConfig())
   handle(
     'config:save-model-mappings',

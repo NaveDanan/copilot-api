@@ -149,6 +149,13 @@ export interface Locale {
     minimizeToTray: string
     minimizeToTrayDesc: string
     sectionSecurity: string
+    increasedSecurity: string
+    increasedSecurityDesc: string
+    securitySuggestionTitle: string
+    securitySuggestionBody: string
+    securitySuggestionNote: string
+    securitySuggestionEnable: string
+    securitySuggestionNotNow: string
     serverKeysNote: string
     apiKeysLabel: string
     apiKeysDesc: string

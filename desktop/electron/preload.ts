@@ -19,6 +19,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings: unknown) =>
     ipcRenderer.invoke('settings:save', settings),
+  setIncreasedSecurity: (enabled: boolean) =>
+    ipcRenderer.invoke('settings:set-increased-security', enabled),
   getModelMappingsConfig: () => ipcRenderer.invoke('config:get-model-mappings'),
   saveModelMappings: (modelMappings: Record<string, string>) =>
     ipcRenderer.invoke('config:save-model-mappings', modelMappings),

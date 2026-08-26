@@ -181,6 +181,8 @@ export interface DesktopSettings {
   oauthApp: 'default' | 'opencode'
   enterpriseUrl: string
   lastPort: number
+  increasedSecurity: boolean
+  securitySuggestionShown: boolean
   launchAtLogin: boolean
   autoStartServer: boolean
   minimizeToTray: boolean
@@ -191,6 +193,24 @@ export interface DesktopSettings {
   theme: ThemePreference
   proxy: DesktopProxySettings
 }
+
+export type DesktopSettingsUpdate = Partial<
+  Pick<
+    DesktopSettings,
+    | 'apiHome'
+    | 'oauthApp'
+    | 'enterpriseUrl'
+    | 'increasedSecurity'
+    | 'launchAtLogin'
+    | 'autoStartServer'
+    | 'minimizeToTray'
+    | 'verbose'
+    | 'showToken'
+    | 'language'
+    | 'theme'
+    | 'proxy'
+  >
+>
 
 // Extend the global window type for the renderer process.
 declare global {
@@ -210,7 +230,10 @@ declare global {
       stopServer: () => Promise<void>
       getServerStatus: () => Promise<ServerStatus>
       getSettings: () => Promise<DesktopSettings>
-      saveSettings: (settings: DesktopSettings) => Promise<void>
+      saveSettings: (
+        settings: DesktopSettingsUpdate,
+      ) => Promise<DesktopSettings>
+      setIncreasedSecurity: (enabled: boolean) => Promise<DesktopSettings>
       getModelMappingsConfig: () => Promise<ModelMappingsConfig>
       saveModelMappings: (
         modelMappings: Record<string, string>,

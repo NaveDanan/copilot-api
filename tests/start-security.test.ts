@@ -3,7 +3,11 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-import { getStartupSecurityWarnings, resolveServerTls } from "~/start"
+import {
+  getStartupSecurityWarnings,
+  resolveServerHostname,
+  resolveServerTls,
+} from "~/start"
 
 const temporaryDirectories: string[] = []
 
@@ -16,6 +20,12 @@ afterEach(async () => {
 })
 
 describe("startup security controls", () => {
+  test("keeps the legacy listener unless strict security is enabled", () => {
+    expect(resolveServerHostname(undefined, false)).toBe("0.0.0.0")
+    expect(resolveServerHostname(undefined, true)).toBe("127.0.0.1")
+    expect(resolveServerHostname("192.168.1.10", true)).toBe("192.168.1.10")
+  })
+
   test("warns for every explicitly enabled disclosure route", () => {
     const warnings = getStartupSecurityWarnings({
       githubToken: "github-token",

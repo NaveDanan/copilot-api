@@ -3,9 +3,18 @@ if [ "$1" = "--auth" ]; then
   # Run auth command
   exec bun --use-system-ca run dist/main.js auth
 else
-  # Convert Docker's environment secret into the existing protected credential
-  # file, then remove it before the long-lived server process starts.
-  if [ -n "${GH_TOKEN:-}" ]; then
+  strict_security=false
+  for arg in "$@"; do
+    case "$arg" in
+      --strict-security|--strict-security=true)
+        strict_security=true
+        break
+        ;;
+    esac
+  done
+
+  # Strict mode removes the token from the long-lived process arguments.
+  if [ "$strict_security" = true ] && [ -n "${GH_TOKEN:-}" ]; then
     token_dir="${COPILOT_API_HOME:-$HOME/.local/share/copilot-api}/${COPILOT_API_OAUTH_APP:-}"
     token_name="github_token"
     if [ -n "${COPILOT_API_ENTERPRISE_URL:-}" ]; then
@@ -21,5 +30,8 @@ else
   fi
 
   # Default command
+  if [ "$strict_security" = false ] && [ -n "${GH_TOKEN:-}" ]; then
+    exec bun --use-system-ca run dist/main.js start --github-token "$GH_TOKEN" "$@"
+  fi
   exec bun --use-system-ca run dist/main.js start "$@"
 fi

@@ -166,6 +166,10 @@ export const copilotBaseUrl = (state: State) => {
     return "https://api.githubcopilot.com"
   }
 
+  if (!state.strictSecurity && state.copilotApiUrl) {
+    return state.copilotApiUrl
+  }
+
   const trustedApiUrl = resolveTrustedCopilotApiUrl(state.copilotApiUrl)
   if (trustedApiUrl) {
     return trustedApiUrl

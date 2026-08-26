@@ -23,6 +23,8 @@ export interface State {
 
   verbose: boolean
 
+  strictSecurity: boolean
+
   copilotApiUrl?: string
   tokenBasedBilling?: boolean
 }
@@ -30,6 +32,7 @@ export interface State {
 export const state: State = {
   accountType: "individual",
   showToken: false,
+  strictSecurity: false,
   verbose: false,
   vsCodeDeviceId: randomUUID(),
 }

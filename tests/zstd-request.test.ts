@@ -3,6 +3,7 @@ import { Hono } from "hono"
 
 import {
   createZstdDecompressionMiddleware,
+  legacyZstdDecompressionMiddleware,
   zstdDecompressionMiddleware,
 } from "~/lib/zstd-request"
 
@@ -65,6 +66,26 @@ describe("zstd request middleware", () => {
 
     expect(response.status).toBe(200)
     expect(await response.json()).toMatchObject({ payload })
+  })
+
+  test("keeps the legacy decoder available for compatibility mode", async () => {
+    const app = new Hono()
+    app.use(legacyZstdDecompressionMiddleware)
+    app.post("/echo", async (c) => c.json(await c.req.json()))
+    const payload = { compatible: true }
+    const body = await Bun.zstdCompress(JSON.stringify(payload))
+
+    const response = await app.request("/echo", {
+      body,
+      headers: {
+        "content-encoding": "zstd",
+        "content-type": "application/json",
+      },
+      method: "POST",
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual(payload)
   })
 
   test("rejects invalid zstd request bodies", async () => {

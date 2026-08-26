@@ -472,13 +472,13 @@ JSON
 chmod 600 ./copilot-data/config.json
 docker run -p 127.0.0.1:4141:4141 \
   -v $(pwd)/copilot-data:/root/.local/share/copilot-api \
-  copilot-api --host 0.0.0.0 --allow-insecure-http
+  copilot-api --strict-security --host 0.0.0.0 --allow-insecure-http
 ```
 
 这会把宿主机上的 `./copilot-data` 映射到容器内的 `/root/.local/share/copilot-api`，用于持久化 GitHub 认证数据、provider 配置和其他 gateway 状态。
 这里显式使用不安全 HTTP 仅因为 Docker 只把端口发布到宿主机 loopback。若要将服务发布到网络，请改用 `--tls-cert` 和 `--tls-key`。
 
-请优先把认证信息保存到挂载目录，不要把 GitHub token 放入镜像或命令行。自动化部署仍支持 `GH_TOKEN`，容器 entrypoint 会在服务启动前将其移入受保护的 token 文件。不过原始环境变量仍可能通过容器元数据暴露，因此应优先使用挂载的 token 文件或部署平台的 file-based secret 机制。
+请优先把认证信息保存到挂载目录，不要把 GitHub token 放入镜像或命令行。自动化部署仍支持 `GH_TOKEN`。启用 `--strict-security` 时，容器 entrypoint 会在服务启动前将其移入受保护的 token 文件；兼容模式仍通过旧的 `--github-token` 参数传入。不过原始环境变量仍可能通过容器元数据暴露，因此应优先使用挂载的 token 文件或部署平台的 file-based secret 机制。
 
 <a id="electron-desktop-app"></a>
 
@@ -486,7 +486,7 @@ docker run -p 127.0.0.1:4141:4141 \
 
 如果你更喜欢图形界面，仓库里还提供了位于 `desktop/` 的 Electron 桌面应用。它支持 GitHub Copilot 登录、OpenAI Codex OAuth，以及 Kimi、DeepSeek、DashScope、OpenRouter 或自定义 provider 的 API Key 配置。授权或配置 provider 后，可以一键启动或停止本地代理，并在界面里直接查看本地端点、鉴权 Header、可用模型、额度和日志。
 
-设置页还可以配置 `OAuth App`、`API Home`、`Enterprise URL`、详细日志以及最小化到托盘。Windows x64（`.exe`）、macOS Apple Silicon（`.dmg`）和 Linux x64（`.AppImage`）安装包发布在 GitHub Releases：
+设置页还可以配置“增强安全性”、`OAuth App`、`API Home`、`Enterprise URL`、详细日志以及最小化到托盘。增强安全性默认关闭以保持兼容，应用会在首次使用时提示一次，并在下次启动服务时生效。Windows x64（`.exe`）、macOS Apple Silicon（`.dmg`）和 Linux x64（`.AppImage`）安装包发布在 GitHub Releases：
 
 https://github.com/caozhiyuan/copilot-api/releases
 
@@ -675,7 +675,7 @@ Copilot API 现在使用子命令结构，主要命令包括：
 
 | 选项 | 说明 | 默认值 | 别名 |
 | --- | --- | --- | --- |
-| --host | 监听地址；非 loopback 地址要求配置 `auth.apiKeys`，并启用 TLS 或显式允许不安全 HTTP | 127.0.0.1 | 无 |
+| --host | 监听地址；启用 `--strict-security` 时默认只监听 loopback | 0.0.0.0 | 无 |
 | --port | 监听端口 | 4141 | -p |
 | --verbose | 将完整提示词、响应和工具载荷写入本地日志并保留最多 7 天 | false | -v |
 | --github-token | 通过进程参数和 shell 历史直接提供 GitHub token | 无 | -g |
@@ -683,6 +683,7 @@ Copilot API 现在使用子命令结构，主要命令包括：
 | --show-token | 打印可复用的 GitHub、Copilot 和 Codex token | false | 无 |
 | --proxy-env | 从环境变量初始化代理；代理可能查看 provider 凭据和聊天流量 | false | 无 |
 | --allow-insecure-http | 允许在非 loopback 地址使用可被拦截的 HTTP | false | 无 |
+| --strict-security | 启用严格的网络、浏览器、provider URL、凭据和压缩请求检查 | false | 无 |
 | --tls-cert | TLS 证书 PEM 文件路径；必须与 `--tls-key` 同时使用 | 无 | 无 |
 | --tls-key | TLS 私钥 PEM 文件路径；必须与 `--tls-cert` 同时使用 | 无 | 无 |
 
@@ -794,7 +795,7 @@ Copilot API 现在使用子命令结构，主要命令包括：
 - **messageApiWebSearchModel：** 顶层 Copilot `/v1/messages` 请求只包含服务端 `web_search` 工具时使用的全局模型，默认值为 `gpt-5-mini`。如果该值是 `provider/model` 别名，请求会进入对应 provider 的 Messages API 路径，并在转发前移除 provider 前缀。对于 Copilot GPT 模型，web search 会通过 `/responses` 执行。混合 `web_search` 与自定义工具的场景暂不支持，服务端会移除 server-side `web_search`。
 - **claudeAutoModel：** 用于 Claude Code 后台 security-monitor 请求的模型，作用于 `/v1/messages` 和 provider Messages 路由。当请求不带任何工具、`stop_sequences` 为 `["</block>"]`，且 system 文本块以 `You are a security monitor for autonomous AI coding agents.` 开头时，会被识别为 security-monitor 请求，其模型会被替换为该配置值。对于顶层请求，`provider/model` 别名会转发到对应 provider 的 Messages API；对于 provider 路由，则保持当前 provider，直接使用该配置值。默认为空（禁用）。
 - **claudeTokenMultiplier：** 用于 Claude `/v1/messages/count_tokens` 请求在本地走 GPT tokenizer 估算时的乘数。默认值为 `1.15`。如果你的客户端仍然过晚触发上下文压缩，可以适当调大。这个配置只会在代理本地估算 Claude token 时生效；如果已经配置 `anthropicApiKey` 且 Anthropic token counting 调用成功，则会直接返回 Anthropic 的精确计数，不会使用这个乘数。
-- **anthropicApiKey：** 用于把 Claude `/v1/messages/count_tokens` 请求转发到 Anthropic 真实 token counting 端点的 API key，这样会返回精确计数，而不是 GPT tokenizer 估算值。必须在 `config.json` 中显式配置，因为启用后会把完整的 token-counting 请求（包括 prompts 和 tool definitions）直接发送给 Anthropic。系统会有意忽略 `ANTHROPIC_API_KEY` 环境变量。若未配置，或上游调用失败，则回退到由 `claudeTokenMultiplier` 控制的本地 GPT tokenizer 估算。
+- **anthropicApiKey：** 用于把 Claude `/v1/messages/count_tokens` 请求转发到 Anthropic 真实 token counting 端点的 API key，这样会返回精确计数，而不是 GPT tokenizer 估算值。兼容模式仍可回退到 `ANTHROPIC_API_KEY`；严格安全模式要求在 `config.json` 中显式配置，因为启用后会把完整的 token-counting 请求（包括 prompts 和 tool definitions）直接发送给 Anthropic。若没有可用 key，或上游调用失败，则回退到由 `claudeTokenMultiplier` 控制的本地 GPT tokenizer 估算。
 
 编辑此文件后即可自定义 prompts，或替换为你自己的快速模型。修改完成后请重启服务（或重新执行命令），让缓存中的配置刷新生效。
 
@@ -804,13 +805,13 @@ Copilot API 现在使用子命令结构，主要命令包括：
 
 - **受保护的普通路由：** 当配置了 `auth.apiKeys` 且非空时，除 `/`、`/usage-viewer` 和 `/usage-viewer/` 以外的普通路由都需要认证。
 - **Admin 路由：** 所有 `/admin/*` 路由都要求 `auth.adminApiKey`。如果缺失，服务会在启动时自动生成并在开始提供服务前写回 `config.json`。
-- **仅本机访问的默认值：** 服务默认绑定 `127.0.0.1`。绑定任何非 loopback 地址时，必须显式设置 `--host`、至少配置一个 `auth.apiKeys` 条目，并同时提供 `--tls-cert` 与 `--tls-key`，或使用会触发警告的 `--allow-insecure-http`。
-- **浏览器隔离：** 禁止跨源浏览器访问。未配置普通 API key 时，系统会拒绝带有非 loopback `Host` 请求头的请求，以阻止 DNS rebinding。HTTPS 反向代理应设置 `X-Forwarded-Proto`。
-- **Usage Viewer 隔离：** Viewer 不加载任何第三方脚本或字体，只接受同源 API endpoint，仅在当前标签页的 session storage 中保存 API key，不会跨源或沿 redirect 转发，并通过严格的 Content Security Policy 提供页面。
+- **兼容模式默认值：** 未启用 `--strict-security` 时，服务保留原有的 `0.0.0.0` 监听、通配 CORS、远程 Usage Viewer endpoint、环境变量 Anthropic key 回退和现有 provider URL 行为。
+- **严格网络策略：** 启用 `--strict-security` 后，服务默认绑定 `127.0.0.1`。非 loopback 地址要求配置 `auth.apiKeys`，并使用 TLS 或 `--allow-insecure-http`。
+- **严格浏览器隔离：** 严格模式会禁止跨源浏览器访问，并在没有普通 API key 时拒绝非 loopback `Host`。Usage Viewer 只允许同源访问、仅在当前标签页保存 key、阻止 redirect，并启用 CSP。
 - **允许的认证头：**
   - `x-api-key: <your_key>`
   - `Authorization: Bearer <your_key>`
-- **未配置普通 key 时：** 只有通过 loopback host 访问时，普通路由才可直接使用；但这条规则不适用于 `/admin/*`，后者只接受 `auth.adminApiKey`。
+- **未配置普通 key 时：** 严格模式下，普通路由只有通过 loopback host 才允许未认证访问；兼容模式保留原有 host 行为。但这条规则不适用于 `/admin/*`，后者只接受 `auth.adminApiKey`。
 
 普通受保护路由的示例请求：
 

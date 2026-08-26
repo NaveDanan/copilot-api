@@ -1,4 +1,5 @@
 import { Hono } from "hono"
+import { cors } from "hono/cors"
 import { logger } from "hono/logger"
 
 import {
@@ -10,12 +11,17 @@ import {
   getConfiguredAdminApiKeys,
 } from "./lib/request-auth"
 import { traceIdMiddleware } from "./lib/trace"
+import { state } from "./lib/state"
 import {
+  compatibilityUsageViewerHtml,
   usageViewerContentSecurityPolicy,
   usageViewerCss,
   usageViewerHtml,
 } from "./usage-viewer"
-import { zstdDecompressionMiddleware } from "./lib/zstd-request"
+import {
+  legacyZstdDecompressionMiddleware,
+  zstdDecompressionMiddleware,
+} from "./lib/zstd-request"
 import { alphaSearchRoutes } from "./routes/alpha-search/route"
 import { completionRoutes } from "./routes/chat-completions/route"
 import { configRoutes } from "./routes/admin/config/route"
@@ -36,8 +42,12 @@ import { usageRoute } from "./routes/usage/route"
 export const server = new Hono()
 
 server.use(traceIdMiddleware)
-server.use(createHostValidationMiddleware())
-server.use(browserIsolationMiddleware)
+if (state.strictSecurity) {
+  server.use(createHostValidationMiddleware())
+  server.use(browserIsolationMiddleware)
+} else {
+  server.use(cors())
+}
 server.use(logger())
 server.use(
   "*",
@@ -59,16 +69,24 @@ server.use(
     allowWhenNoApiKeys: false,
   }),
 )
-server.use(zstdDecompressionMiddleware)
+server.use(
+  state.strictSecurity ?
+    zstdDecompressionMiddleware
+  : legacyZstdDecompressionMiddleware,
+)
 
 server.get("/", (c) => c.text("Server running"))
 server.get("/usage-viewer", (c) => {
-  c.header("Content-Security-Policy", usageViewerContentSecurityPolicy)
-  c.header("Referrer-Policy", "no-referrer")
-  c.header("X-Content-Type-Options", "nosniff")
-  c.header("X-Frame-Options", "DENY")
-  c.header("Cache-Control", "no-store")
-  return c.html(usageViewerHtml)
+  if (state.strictSecurity) {
+    c.header("Content-Security-Policy", usageViewerContentSecurityPolicy)
+    c.header("Referrer-Policy", "no-referrer")
+    c.header("X-Content-Type-Options", "nosniff")
+    c.header("X-Frame-Options", "DENY")
+    c.header("Cache-Control", "no-store")
+    return c.html(usageViewerHtml)
+  }
+
+  return c.html(compatibilityUsageViewerHtml)
 })
 server.get("/usage-viewer/", (c) => c.redirect("/usage-viewer", 301))
 server.get("/usage-viewer/usage-viewer.css", (c) => {
